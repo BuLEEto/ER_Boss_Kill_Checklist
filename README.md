@@ -1,20 +1,19 @@
 # Elden Ring Boss Checklist
 
-A real-time boss kill tracker for Elden Ring with OBS overlay support. Reads your save file in **read-only mode** to track which bosses you've defeated — safe to use with EAC.
+A real-time boss kill tracker for Elden Ring with OBS overlay support. Reads your save file (**read-only**) to track which bosses you've defeated — safe to use with EAC.
 
 ## Features
 
-- Automatically detects boss kills from your save file (read-only, never writes)
-- Multiple boss lists: all bosses, main story, remembrance, DLC
-- Death counter per character
-- OBS-compatible transparent overlay
-- Mobile-friendly companion page
-- Multi-slot support (up to 10 characters)
+- Automatically detects boss kills from your save file (**read-only**)
+- Multiple boss lists: all bosses, main story, remembrance, DLC, etc
+- Reads players death count & level
+- OBS-compatible transparent overlay (Can also be previewed to a browser and kept on a second screen without using OBS)
+- Mobile-friendly companion page (Useful for single monitor players)
 - Works on Linux and Windows
 
 ## Building
 
-Requires the [Odin compiler](https://odin-lang.org/) (latest build dev-2026-03 recommended).
+Requires the [Odin compiler](https://odin-lang.org/) (latest build dev-2026-03 recommended due to the core:os changes)
 
 ### Linux
 
@@ -42,11 +41,13 @@ odin build . -out:er-boss-checklist.exe
 ./er-boss-checklist
 ```
 
-Open `http://localhost:3000` in your browser. Use the settings panel to configure your save file path and active character slot.
+Open `http://localhost:3000` in your browser (if it doesn't open automatically). 
+
+Use the settings panel to configure your save file path and active character slot.
 
 ### OBS Overlay
 
-Add a Browser Source in OBS pointing to `http://localhost:3000/overlay`. The overlay has a transparent background and updates in real-time.
+Add a Browser Source in OBS pointing to `http://localhost:3000/overlay`. The overlay has a configurable transparent background and updates in real-time.
 
 ### Save File Locations
 
@@ -78,15 +79,13 @@ For Seamless Co-op, the file is `ER0000.co2` under the mod's app ID instead of `
 | `templates/` | HTML templates (main page, overlay, mobile) |
 | `static/` | CSS and JavaScript |
 
-## How It Works
+The parser was built by cross-referencing three independent format implementations. 
 
-The save parser walks through the binary save format sequentially — parsing each section header and variable-length data to locate the event flags region. Boss kills are stored as individual bits in the event flags, checked against known flag IDs from `bosses.json`.
-
-The parser was built by cross-referencing three independent format implementations. See [THIRD_PARTY.md](THIRD_PARTY.md) for full credits and licenses.
+See [THIRD_PARTY.md](THIRD_PARTY.md) for full credits and licenses.
 
 ## Safety
 
-This application **never writes to your save file**. It opens the file in read-only mode to check event flags. It will not trigger any anti-cheat detection.
+This application **never writes to your save file**. It opens the file in read-only mode to check event flags. It should not trigger any anti-cheat detection.
 
 ## License
 
