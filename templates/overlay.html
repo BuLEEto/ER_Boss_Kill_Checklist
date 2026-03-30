@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ER Boss Overlay</title>
+    <link rel="stylesheet" href="/static/overlay.css">
+    <link rel="icon" href="data:,">
+</head>
+<body>
+    {{#if save_loaded}}
+    <div class="overlay">
+        <div class="overlay-header">
+            <div class="header-row">
+                <span class="char-name">{{slot_name}}</span>
+                <span class="char-level">Lvl {{slot_level}}</span>
+            </div>
+            <div class="header-row">
+                {{#if show_deaths}}
+                <span class="deaths">{{death_count}} deaths</span>
+                {{/if}}
+            </div>
+            <div class="header-row">
+                <span class="remaining-label">{{remaining}} REMAINING ({{killed_count}}/{{total_bosses}})</span>
+            </div>
+        </div>
+
+        {{#if is_summary}}
+        <div class="summary-list">
+            {{#each regions}}
+            <div class="summary-row {{#if is_complete}}summary-complete{{/if}}">
+                <span class="summary-name">{{region_name}}</span>
+                <span class="summary-count">{{region_killed}}/{{region_total}}</span>
+            </div>
+            {{/each}}
+        </div>
+        {{/if}}
+
+        {{#if is_region}}
+        <div class="remaining-label">{{focus_region_name}}</div>
+        <div class="boss-list">
+            {{#each bosses}}
+            <div class="boss-item">
+                <div class="boss-name">{{boss}}</div>
+                {{#if place}}<div class="boss-place">{{place}}</div>{{/if}}
+            </div>
+            {{/each}}
+        </div>
+        {{/if}}
+
+        {{#if is_next}}
+        <div class="remaining-label">Next up</div>
+        <div class="boss-list">
+            {{#each bosses}}
+            <div class="boss-item">
+                <div class="boss-name">{{boss}}</div>
+                <div class="boss-place">{{region_name}}{{#if place}} — {{place}}{{/if}}</div>
+            </div>
+            {{/each}}
+        </div>
+        {{/if}}
+    </div>
+    {{/if}}
+
+    {{#unless save_loaded}}
+    <div class="overlay no-data">
+        <p>Waiting for save file...</p>
+    </div>
+    {{/unless}}
+
+    <script src="/static/overlay.js"></script>
+</body>
+</html>

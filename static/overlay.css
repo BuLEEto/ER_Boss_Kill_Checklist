@@ -1,0 +1,178 @@
+/* OBS Browser Source Overlay */
+
+:root {
+    --gold: #c8a84e;
+    --gold-dim: #8a7030;
+    --text: #e0dcd0;
+    --text-dim: #999;
+    --red: #c06060;
+    --green: #5a8a5a;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: transparent;
+    color: var(--text);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+body.bg-green { background: #00ff00; }
+body.bg-magenta { background: #ff00ff; }
+
+.overlay {
+    width: 320px;
+    padding: 10px 12px;
+    background: rgba(20, 20, 20, 0.88);
+    border: 1px solid rgba(200, 168, 78, 0.3);
+    border-radius: 8px;
+    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+body.bg-green .overlay,
+body.bg-magenta .overlay {
+    background: transparent;
+    border-color: transparent;
+    text-shadow:
+        -2px -2px 0 #000,
+         2px -2px 0 #000,
+        -2px  2px 0 #000,
+         2px  2px 0 #000,
+         0   -2px 0 #000,
+         0    2px 0 #000,
+        -2px  0   0 #000,
+         2px  0   0 #000,
+        -1px -1px 0 #000,
+         1px -1px 0 #000,
+        -1px  1px 0 #000,
+         1px  1px 0 #000,
+         0    0   6px #000,
+         0    0  10px #000;
+}
+
+body.bg-green .summary-count,
+body.bg-magenta .summary-count {
+    color: #ffdd44;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+
+body.bg-green .overlay-header,
+body.bg-magenta .overlay-header {
+    border-bottom-color: transparent;
+}
+
+/* Header */
+.overlay-header {
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(200, 168, 78, 0.2);
+    margin-bottom: 6px;
+}
+
+.header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+}
+
+.char-name {
+    color: var(--gold);
+    font-weight: bold;
+    font-size: 14px;
+}
+
+.char-level {
+    color: var(--gold);
+    font-size: 14px;
+    font-weight: bold;
+}
+
+.progress {
+    color: var(--text-dim);
+    font-size: 12px;
+}
+
+.deaths {
+    color: var(--red);
+    font-size: 12px;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+.remaining-label {
+    font-size: 12px;
+    color: var(--gold);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+/* Summary mode */
+.summary-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.summary-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px 0;
+    font-size: 12px;
+}
+
+.summary-name {
+    color: var(--text);
+}
+
+.summary-count {
+    color: var(--gold-dim);
+    font-size: 11px;
+    min-width: 40px;
+    text-align: right;
+}
+
+.summary-complete .summary-name {
+    text-decoration: line-through;
+}
+
+.summary-complete .summary-count {
+    text-decoration: line-through;
+}
+
+/* Boss list (region & next modes) */
+.boss-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.boss-item {
+    padding: 4px 0 4px 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.boss-item:last-child {
+    border-bottom: none;
+}
+
+.boss-name {
+    font-size: 12px;
+    color: var(--text);
+    line-height: 1.3;
+}
+
+.boss-place {
+    font-size: 10px;
+    color: var(--text-dim);
+    line-height: 1.3;
+}
+
+.no-data {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-dim);
+}

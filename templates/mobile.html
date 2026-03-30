@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>ER Boss Checklist</title>
+    <link rel="stylesheet" href="/static/mobile.css">
+    <link rel="icon" href="data:,">
+</head>
+<body>
+    {{#if save_loaded}}
+    <div class="sticky-header">
+        <div class="header-top">
+            <span class="char-name">{{slot_name}}</span>
+            <span class="char-level">Lvl {{slot_level}}</span>
+        </div>
+        <div class="header-mid">
+            <span class="deaths">{{death_count}} deaths</span>
+        </div>
+        <div class="header-bottom">
+            <span class="remaining">{{remaining}} REMAINING ({{killed_count}}/{{total_bosses}})</span>
+        </div>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progress-fill"></div>
+        </div>
+    </div>
+
+    <div class="region-list">
+        {{#each regions}}
+        <div class="region {{#if is_complete}}region-complete{{/if}}">
+            <div class="region-header" data-region-index="{{@index}}">
+                <span class="region-name">{{region_name}}</span>
+                <span class="region-count">{{region_killed}}/{{region_total}}</span>
+            </div>
+            <div class="region-bosses" id="region-{{@index}}">
+                {{#each bosses}}
+                <div class="boss-row {{#if killed}}boss-killed{{/if}}">
+                    <span class="boss-check">{{#if killed}}&#10003;{{/if}}</span>
+                    <div class="boss-info">
+                        <div class="boss-name">{{boss}}</div>
+                        {{#if place}}<div class="boss-place">{{place}}</div>{{/if}}
+                    </div>
+                </div>
+                {{/each}}
+            </div>
+        </div>
+        {{/each}}
+    </div>
+    {{/if}}
+
+    {{#unless save_loaded}}
+    <div class="no-data">
+        <p>Waiting for save file...</p>
+        <p class="hint">Configure save file at<br>http://localhost:3000</p>
+    </div>
+    {{/unless}}
+
+    <script src="/static/mobile.js"></script>
+</body>
+</html>

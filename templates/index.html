@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Elden Ring Boss Checklist</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="data:,">
+</head>
+<body>
+    <!-- Config data for JS (hidden) -->
+    <div id="app-config" style="display:none">
+        <span id="cfg-active-slot">{{active_slot}}</span>
+        <span id="cfg-save-path">{{save_path}}</span>
+        <span id="cfg-total-bosses">{{total_bosses}}</span>
+        <span id="cfg-killed-count">{{killed_count}}</span>
+        <span id="cfg-poll-seconds">{{poll_seconds}}</span>
+    </div>
+
+    <div class="container">
+        <h1>Elden Ring Boss Checklist</h1>
+
+        <form method="POST" action="/config" class="config-form">
+            <div class="form-row">
+                <label>
+                    <span>Save File Path</span>
+                    <div class="input-browse">
+                        <input type="text" name="save_path" id="save-path" placeholder="/path/to/ER0000.sl2" readonly>
+                        <button type="button" class="btn btn-small" id="scan-btn" title="Auto-detect save files from Steam">Scan</button>
+                        <button type="button" class="btn btn-small" id="browse-btn" title="Manually browse for a save file">Browse</button>
+                    </div>
+                    <div class="input-hint">Scan auto-detects saves from Steam. Browse to manually locate a save file.</div>
+                </label>
+            </div>
+            <div class="form-row">
+                <label>
+                    <span>Character Slot</span>
+                    <select name="slot" id="slot-select">
+                        <option value="-1">-- Select Slot --</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Boss List</span>
+                    <select name="boss_list">
+                        <option value="standard" {{#if is_standard}}selected{{/if}}>All Bosses</option>
+                        <option value="hardlock" {{#if is_hardlock}}selected{{/if}}>All Bosses (Hardlock)</option>
+                        <option value="remembrance" {{#if is_remembrance}}selected{{/if}}>Remembrance Only</option>
+                        <option value="remembrance_dlc" {{#if is_remembrance_dlc}}selected{{/if}}>Remembrance + DLC</option>
+                        <option value="great_runes" {{#if is_great_runes}}selected{{/if}}>Great Runes</option>
+                        <option value="main_story" {{#if is_main_story}}selected{{/if}}>Main Story</option>
+                        <option value="dlc_only" {{#if is_dlc_only}}selected{{/if}}>DLC Only</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Poll Rate</span>
+                    <select name="poll_rate" id="poll-rate">
+                        <option value="1">1s</option>
+                        <option value="2">2s</option>
+                        <option value="3">3s</option>
+                        <option value="5">5s</option>
+                        <option value="10">10s</option>
+                        <option value="30">30s</option>
+                    </select>
+                </label>
+                <button type="submit" class="btn">Apply</button>
+            </div>
+        </form>
+
+        {{#if save_loaded}}
+        <div class="status-bar">
+            <div class="character-info">
+                <span class="char-name">{{slot_name}}</span>
+                <span class="char-level">Lv {{slot_level}}</span>
+                {{#if show_deaths}}
+                <span class="death-count">Deaths: {{death_count}}</span>
+                {{/if}}
+            </div>
+            <div class="progress">
+                <span class="progress-text" id="progress-text">{{killed_count}} / {{total_bosses}} defeated</span>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+            </div>
+            <form method="POST" action="/toggle-deaths" class="inline-form">
+                <button type="submit" class="btn btn-small">{{#if show_deaths}}Hide{{/if}}{{#unless show_deaths}}Show{{/unless}} Deaths</button>
+            </form>
+        </div>
+
+        <div class="controls-bar">
+            <button class="btn btn-small" id="toggle-completed-btn">Hide Completed Regions</button>
+        </div>
+
+        <div class="overlay-builder">
+            <div class="builder-header">
+                <h3>OBS / Stream Overlay</h3>
+            </div>
+            <div class="builder-options">
+                <div class="builder-row">
+                    <span class="builder-label">Mode</span>
+                    <div class="builder-btns" id="mode-btns">
+                        <button class="mode-btn active" data-mode="summary">Summary</button>
+                        <button class="mode-btn" data-mode="next">Next Bosses</button>
+                        <button class="mode-btn" data-mode="region">Region Focus</button>
+                    </div>
+                </div>
+                <div class="builder-row" id="count-row" style="display:none">
+                    <span class="builder-label">Show</span>
+                    <select id="next-count">
+                        <option value="5">5 bosses</option>
+                        <option value="8" selected>8 bosses</option>
+                        <option value="10">10 bosses</option>
+                        <option value="15">15 bosses</option>
+                    </select>
+                </div>
+                <div class="builder-row" id="region-row" style="display:none">
+                    <span class="builder-label">Region</span>
+                    <select id="region-select">
+                    </select>
+                </div>
+                <div class="builder-row">
+                    <span class="builder-label">Options</span>
+                    <label class="check-label"><input type="checkbox" id="opt-deaths"> Show Deaths</label>
+                    <label class="check-label"><input type="checkbox" id="opt-refresh"> Auto-Refresh</label>
+                    <select id="refresh-interval" style="display:none">
+                        <option value="5">5s</option>
+                        <option value="10" selected>10s</option>
+                        <option value="30">30s</option>
+                        <option value="60">60s</option>
+                    </select>
+                </div>
+                <div class="builder-row">
+                    <span class="builder-label">Background</span>
+                    <div class="builder-btns" id="bg-btns">
+                        <button class="mode-btn active" data-bg="none">Dark Panel</button>
+                        <button class="mode-btn" data-bg="green">Green Screen</button>
+                        <button class="mode-btn" data-bg="magenta">Magenta Key</button>
+                    </div>
+                </div>
+            </div>
+            <div class="builder-url-row">
+                <span class="builder-label">URL</span>
+                <input type="text" id="overlay-url" class="overlay-url-input" readonly>
+                <button class="btn btn-small" id="copy-url-btn">Copy</button>
+                <button class="btn btn-small" id="preview-btn">Preview</button>
+            </div>
+            <div class="obs-guide">
+                <h3 class="guide-toggle" id="guide-toggle">Setup Guide <span class="guide-arrow">&#9660;</span></h3>
+                <div class="guide-content" id="guide-content" style="display:none">
+                    <div class="guide-section">
+                        <h4>Option 1: Browser Source (Recommended)</h4>
+                        <p>Available in OBS Flatpak or OBS with browser plugin installed.</p>
+                        <ol>
+                            <li>In OBS, click <strong>+</strong> under Sources and select <strong>Browser</strong></li>
+                            <li>Paste the overlay URL from above</li>
+                            <li>Set width to <strong>340</strong> and height to <strong>900</strong> (adjust to fit)</li>
+                            <li>Click OK &mdash; the overlay updates automatically via live connection</li>
+                        </ol>
+                        <p class="guide-note">Auto-Refresh: <strong>Not needed</strong> &mdash; updates are pushed to the overlay in real-time.</p>
+                        <p class="guide-note">Background: Use <strong>Dark Panel</strong> for a semi-transparent overlay box, or choose a chroma key colour and add a Colour Key filter in OBS.</p>
+                    </div>
+                    <div class="guide-section">
+                        <h4>Option 2: Window Capture (Fallback)</h4>
+                        <p>For OBS without browser source support (e.g. Debian OBS package).</p>
+                        <ol>
+                            <li>Open the overlay URL in a browser window and resize it to fit the overlay</li>
+                            <li>In OBS, click <strong>+</strong> under Sources and select <strong>Window Capture</strong></li>
+                            <li>Select the browser window showing the overlay</li>
+                            <li>Use a <strong>Crop/Pad</strong> filter to trim any extra browser chrome</li>
+                        </ol>
+                        <p class="guide-note">Auto-Refresh: <strong>Recommended</strong> &mdash; tick Auto-Refresh above (10s is a good default). The browser reloads itself at the set interval to pick up changes.</p>
+                        <p class="guide-note">Background: <strong>Dark Panel</strong> works best. Chroma key is possible but requires careful OBS filter tuning &mdash; text can be harder to read.</p>
+                    </div>
+                    <div class="guide-section">
+                        <h4>Chroma Key Tips</h4>
+                        <ul>
+                            <li><strong>Magenta</strong> is usually better than green &mdash; less likely to clash with Elden Ring's environments</li>
+                            <li>In OBS, add an <strong>Effect Filter &rarr; Colour Key</strong> on the source</li>
+                            <li>Set Similarity to around <strong>300&ndash;400</strong> and Smoothness to <strong>50&ndash;80</strong></li>
+                            <li>If text looks faded, lower the Similarity value</li>
+                        </ul>
+                    </div>
+                    <div class="guide-section">
+                        <h4>Mobile Second Screen</h4>
+                        <p>Open <strong>http://{{lan_ip}}:3000/mobile</strong> on your phone (same Wi-Fi network) for a touch-friendly boss tracker with live updates.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {{/if}}
+
+        {{#unless save_loaded}}
+        <div class="no-save">
+            <p>Select a save file to begin. Supports .sl2, .co2, .rd2 formats.</p>
+            <p class="warning">Read-only &mdash; your save file is never modified. Safe to use with EAC / online play.</p>
+        </div>
+        {{/unless}}
+
+        <div class="regions" id="regions">
+            {{#each regions}}
+            <div class="region">
+                <div class="region-header">
+                    <h2>{{region_name}}</h2>
+                    <span class="region-count">{{region_killed}} / {{region_total}}</span>
+                </div>
+                <div class="region-body">
+                    {{#each bosses}}
+                    <div class="boss {{#if killed}}killed{{/if}}">
+                        <span class="boss-check">{{#if killed}}&#10003;{{/if}}</span>
+                        <span class="boss-name">{{boss}}</span>
+                        {{#if place}}<span class="boss-place">{{place}}</span>{{/if}}
+                    </div>
+                    {{/each}}
+                </div>
+            </div>
+            {{/each}}
+        </div>
+    </div>
+
+    <!-- Scan Results Modal -->
+    <div class="modal-overlay" id="scan-modal" style="display:none">
+        <div class="modal modal-wide">
+            <div class="modal-header">
+                <h3>Found Save Files</h3>
+                <button class="modal-close" id="scan-close-btn">&times;</button>
+            </div>
+            <div class="modal-body" id="scan-entries"></div>
+        </div>
+    </div>
+
+    <!-- File Browser Modal -->
+    <div class="modal-overlay" id="file-modal" style="display:none">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Select Save File</h3>
+                <button class="modal-close" id="modal-close-btn">&times;</button>
+            </div>
+            <div class="modal-path" id="modal-path"></div>
+            <div class="modal-body" id="modal-entries"></div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
