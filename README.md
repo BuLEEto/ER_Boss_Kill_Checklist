@@ -87,6 +87,16 @@ See [THIRD_PARTY.md](THIRD_PARTY.md) for full credits and licenses.
 
 This application **never writes to your save file**. It opens the file in read-only mode to check event flags. It should not trigger any anti-cheat detection.
 
+## Disclaimer
+
+- Elden Ring Boss Kill Tracker is provided "as is" without warranty of any kind, express or implied.
+- We are not liable for any loss of data, emotional distress, or damages arising from the use of this application.
+Liability
+- To the fullest extent permitted by law, the developer shall not be liable for any indirect, incidental, special, consequential, or punitive damages arising from your use of Elden Ring Boss Kill Tracker is provided.
+- This includes but is not limited to loss of data, loss of profits, or damages resulting from its use.
+Changes
+- These terms may be updated at any time. Continued use of the application constitutes acceptance of any changes.
+
 ## License
 
 MIT
