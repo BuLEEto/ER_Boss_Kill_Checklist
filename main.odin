@@ -72,7 +72,7 @@ main :: proc() {
 	skald.run(skald.App(Gui, Msg){
 		title = "Elden Ring Boss Checklist",
 		size  = {1100, 760},
-		theme = theme_for_name(app.settings.theme),
+		theme = theme_for_name(app.settings.theme, app.settings.ui_scale),
 		init  = gui_init,
 		update = gui_update,
 		view   = gui_view,

@@ -38,6 +38,8 @@ gui_view :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		skald.divider(ctx),
 		skald.flex(1, body),
 		view_status_bar(s, ctx),
+		// Returns an empty spacer when closed, so it costs nothing here.
+		view_save_dialog(s, ctx),
 		skald.toast(
 			ctx,
 			s.toast_on,
@@ -52,6 +54,45 @@ gui_view :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	)
 }
 
+
+// ----------------------------------------------------------------------------
+// Wrapping body text
+//
+// skald.text only word-wraps when handed an explicit max_width in pixels.
+// `sized` looks like the answer — it defers the build until layout has
+// assigned a rect — but it contributes no intrinsic height to a stack, so
+// a column of them lays every following sibling on top of the text. It's
+// for fill-mode widgets that are given a slot (scroll, table), not for
+// content-sized prose.
+//
+// So measure instead. The renderer knows the window's logical width, and
+// the chrome between it and a paragraph is all ours: the root column's
+// padding, the scroll gutter, and the scrollbar. Recomputed every frame,
+// so it tracks window resizes and the text-size setting for free.
+// ----------------------------------------------------------------------------
+
+// Room on the right for the scroll bar, which otherwise paints over the
+// last few pixels of whatever the content put there — an Apply button, as
+// it turned out.
+SCROLL_GUTTER :: f32(14)
+
+// Width available to prose inside a scrolling tab body.
+content_width :: proc(ctx: ^skald.Ctx(Msg)) -> f32 {
+	th := ctx.theme
+	if ctx.renderer == nil do return 480 // headless / unit-test Ctx
+
+	w := f32(ctx.renderer.fb_size.x)
+	w -= th.spacing.md * 2   // root column padding
+	w -= SCROLL_GUTTER * 2   // scroll content padding
+	w -= SCROLL_GUTTER       // the scrollbar itself
+	if w < 200 do w = 200
+	return w
+}
+
+paragraph :: proc(ctx: ^skald.Ctx(Msg), str: string, color: skald.Color, size: f32) -> skald.View {
+	return skald.text(str, color, size, max_width = content_width(ctx))
+}
+
 // ----------------------------------------------------------------------------
 // Setup tab
 // ----------------------------------------------------------------------------
@@ -63,12 +104,12 @@ view_setup :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	append(&rows, skald.section_header(ctx, "Save file"))
 
 	if len(app.settings.save_path) == 0 {
-		append(&rows, skald.text(
-			"No save file selected yet. Scan finds Elden Ring saves in your Steam libraries, including Proton prefixes.",
+		append(&rows, paragraph(ctx,
+			"No save file selected yet.",
 			th.color.fg_muted, th.font.size_sm,
 		))
 	} else {
-		append(&rows, skald.text(app.settings.save_path, th.color.fg_muted, th.font.size_sm))
+		append(&rows, paragraph(ctx, app.settings.save_path, th.color.fg_muted, th.font.size_sm))
 	}
 
 	if len(app.save_error) > 0 {
@@ -76,28 +117,13 @@ view_setup :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	}
 
 	append(&rows, skald.row(
-		skald.button(ctx, s.scanning ? "Scanning…" : "Scan for saves", Msg(Scan_Requested{}),
+		skald.button(ctx,
+			len(app.settings.save_path) == 0 ? "Choose save file…" : "Change save file…",
+			Msg(Save_Dialog_Opened{}),
 			bg = th.color.primary, fg = th.color.on_primary),
-		skald.button(ctx, "Browse…", Msg(Browse_Requested{})),
 		spacing     = th.spacing.sm,
 		cross_align = .Center,
 	))
-
-	if s.scanning {
-		append(&rows, skald.row(
-			skald.spinner(ctx, size = 16),
-			skald.text("Searching Steam libraries…", th.color.fg_muted, th.font.size_sm),
-			spacing     = th.spacing.sm,
-			cross_align = .Center,
-		))
-	} else if len(s.scan_results) > 0 {
-		append(&rows, view_scan_results(s, ctx))
-	} else if s.scan_ran {
-		append(&rows, skald.text(
-			"Nothing found. Use Browse… to point at ER0000.sl2 / .co2 / .rd2 yourself.",
-			th.color.fg_muted, th.font.size_sm,
-		))
-	}
 
 	// -- Character ----------------------------------------------------------
 	append(&rows, skald.spacer(th.spacing.sm))
@@ -151,9 +177,15 @@ view_setup :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	))
 	append(&rows, skald.form_row(ctx, "Theme",
 		skald.select(
-			ctx, theme_label(app.settings.theme),
-			{"Dark", "Light", "Follow system"},
+			ctx, theme_label(app.settings.theme), theme_labels(),
 			on_theme_selected, width = 200,
+		),
+		label_width = 160,
+	))
+	append(&rows, skald.form_row(ctx, "Text size",
+		skald.select(
+			ctx, ui_scale_label(app.settings.ui_scale), ui_scale_labels(),
+			on_ui_scale_selected, width = 200,
 		),
 		label_width = 160,
 	))
@@ -161,43 +193,180 @@ view_setup :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	return skald.scroll(ctx, {0, 0}, skald.col(
 		..rows[:],
 		spacing     = th.spacing.sm,
+		padding     = SCROLL_GUTTER,
 		cross_align = .Stretch,
 	))
 }
 
-view_scan_results :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
+// The save picker, as a modal. It used to be a list that unfolded inline
+// on the Setup tab, which shoved everything below it down the page and
+// left choosing a character as a separate second step.
+// The save picker, as a modal. It used to be a list that unfolded inline
+// on the Setup tab, which shoved everything below it down the page and
+// left choosing a character as a separate second step.
+view_save_dialog :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	th := ctx.theme
-	rows := make([dynamic]skald.View, context.temp_allocator)
 
-	for found, i in s.scan_results {
-		who := "no characters"
-		if len(found.characters) > 0 {
-			parts := make([dynamic]string, context.temp_allocator)
-			for c in found.characters {
-				append(&parts, fmt.tprintf("%s (RL %d)", c.name, c.level))
-			}
-			who = strings.join(parts[:], ", ", context.temp_allocator)
-		}
-
-		selected := found.path == app.settings.save_path
-		card := skald.col(
+	body: skald.View
+	switch {
+	case s.scanning:
+		body = skald.col(
+			skald.spacer(th.spacing.lg),
 			skald.row(
-				skald.text(found.filename, th.color.fg, th.font.size_md),
-				skald.badge(ctx, fmt.tprintf("AppID %s", found.app_id), tone = .Neutral),
+				skald.spinner(ctx, size = 18),
+				skald.text("Searching Steam libraries…", th.color.fg_muted, th.font.size_md),
 				spacing     = th.spacing.sm,
 				cross_align = .Center,
 			),
-			skald.text(who, th.color.fg_muted, th.font.size_sm),
-			skald.text(found.path, th.color.fg_muted, th.font.size_xs),
-			spacing = 2,
-			padding = th.spacing.sm,
-			bg      = selected ? th.color.selection : skald.Color{},
-			radius  = th.radius.sm,
+			skald.spacer(th.spacing.xs),
+			skald.text(
+				"Including Proton prefixes, Flatpak Steam and Seamless Co-op.",
+				th.color.fg_muted, th.font.size_xs,
+			),
+			skald.spacer(th.spacing.lg),
+			height      = 380,
+			main_align  = .Center,
+			cross_align = .Center,
 		)
-		append(&rows, skald.clickable(ctx, card, Msg(Scan_Result_Picked(i))))
+
+	case len(s.scan_results) == 0:
+		body = skald.col(
+			skald.empty_state(
+				ctx,
+				"No Elden Ring saves found",
+				"Nothing turned up in your Steam libraries. Use Browse… to point at an ER0000.sl2, .co2 or .rd2 yourself.",
+			),
+			height      = 380,
+			main_align  = .Center,
+			cross_align = .Stretch,
+		)
+
+	case:
+		// Zero width means "fill the slot my parent gives me" — the
+		// dialog's content column stretches, so the viewport tracks the
+		// card's real inner width. Hardcoding it overflowed the
+		// scrollbar and clipped the right-hand column.
+		body = skald.scroll(ctx, {0, 380}, view_save_list(s, ctx))
 	}
 
-	return skald.list_frame(ctx, rows[0], ..rows[1:])
+	return skald.dialog(
+		ctx,
+		open = s.save_dialog_open,
+		on_dismiss = on_save_dialog_closed,
+		width = 720,
+		max_width = 760,
+		content = skald.col(
+			skald.text("Choose a save file", th.color.fg, th.font.size_lg),
+			skald.text(
+				"Pick a character to start tracking it.",
+				th.color.fg_muted, th.font.size_sm,
+			),
+			skald.spacer(th.spacing.md),
+			body,
+			skald.spacer(th.spacing.md),
+			skald.row(
+				skald.button(ctx, "Rescan", Msg(Scan_Requested{})),
+				skald.button(ctx, "Browse…", Msg(Browse_Requested{})),
+				skald.flex(1, skald.spacer(0)),
+				skald.button(ctx, "Cancel", Msg(Save_Dialog_Closed{})),
+				spacing     = th.spacing.sm,
+				cross_align = .Center,
+			),
+			spacing     = 0,
+			cross_align = .Stretch,
+		),
+	)
+}
+
+view_save_list :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
+	th := ctx.theme
+	cards := make([dynamic]skald.View, context.temp_allocator)
+
+	for found, save_idx in s.scan_results {
+		is_current := found.path == app.settings.save_path
+		rows := make([dynamic]skald.View, context.temp_allocator)
+
+		append(&rows, skald.row(
+			skald.text(found.filename, th.color.fg, th.font.size_md),
+			skald.badge(ctx, fmt.tprintf("AppID %s", found.app_id), tone = .Neutral),
+			is_current \
+				? skald.badge(ctx, "in use", tone = .Success) \
+				: skald.spacer(0),
+			spacing     = th.spacing.sm,
+			cross_align = .Center,
+		))
+		append(&rows, skald.text(
+			elide_start(found.path, 78), th.color.fg_muted, th.font.size_xs,
+		))
+		append(&rows, skald.spacer(th.spacing.xs))
+
+		if len(found.characters) == 0 {
+			// Either an empty save or one the quick look couldn't read.
+			// Offer it anyway — the full parser may manage.
+			append(&rows, skald.clickable(
+				ctx,
+				skald.row(
+					skald.text(
+						"No characters found — use this file anyway",
+						th.color.fg_muted, th.font.size_sm,
+					),
+					padding     = th.spacing.sm,
+					cross_align = .Center,
+				),
+				Msg(Scan_Result_Picked(save_idx)),
+			))
+		} else {
+			for c in found.characters {
+				selected := is_current && c.index == app.settings.active_slot
+				append(&rows, skald.clickable(
+					ctx,
+					skald.row(
+						skald.text(selected ? "◆" : "◇", th.color.fg_muted, th.font.size_sm),
+						skald.text(c.name, th.color.fg, th.font.size_md),
+						skald.flex(1, skald.spacer(0)),
+						skald.text(
+							fmt.tprintf("RL %d", c.level), th.color.fg_muted, th.font.size_sm,
+						),
+						skald.spacer(th.spacing.sm),
+						skald.text(
+							fmt.tprintf("slot %d", c.index + 1),
+							th.color.fg_muted, th.font.size_xs,
+						),
+						spacing     = th.spacing.sm,
+						padding     = th.spacing.sm,
+						bg          = selected ? th.color.selection : skald.Color{},
+						radius      = th.radius.sm,
+						cross_align = .Center,
+					),
+					Msg(Save_Character_Picked{save = save_idx, slot = c.index}),
+				))
+			}
+		}
+
+		append(&cards, skald.col(
+			..rows[:],
+			spacing     = 2,
+			padding     = th.spacing.sm,
+			bg          = th.color.surface,
+			radius      = th.radius.md,
+			cross_align = .Stretch,
+		))
+	}
+
+	return skald.col(
+		..cards[:],
+		spacing     = th.spacing.sm,
+		padding     = th.spacing.xs,
+		cross_align = .Stretch,
+	)
+}
+
+// Trim a long path from the front, keeping the tail — the Steam ID and
+// filename at the end are what tell two saves apart, the leading
+// /home/user/.steam/... is the same on every row.
+elide_start :: proc(path: string, max_chars: int) -> string {
+	if len(path) <= max_chars do return path
+	return fmt.tprintf("…%s", path[len(path) - max_chars:])
 }
 
 // ----------------------------------------------------------------------------
@@ -364,7 +533,7 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 
 	// -- Browser source -----------------------------------------------------
 	append(&rows, skald.section_header(ctx, "Browser source"))
-	append(&rows, skald.text(
+	append(&rows, paragraph(ctx,
 		"The original route, and the best-looking one: OBS renders the overlay page directly.",
 		th.color.fg_muted, th.font.size_sm,
 	))
@@ -416,7 +585,7 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 			),
 			label_width = 120,
 		))
-		append(&rows, skald.text(
+		append(&rows, paragraph(ctx,
 			"Transparent works with a Browser Source. Use a chroma key colour only if you're capturing a window instead.",
 			th.color.fg_muted, th.font.size_xs,
 		))
@@ -429,7 +598,7 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	// -- Text files ---------------------------------------------------------
 	append(&rows, skald.spacer(th.spacing.sm))
 	append(&rows, skald.section_header(ctx, "Text files"))
-	append(&rows, skald.text(
+	append(&rows, paragraph(ctx,
 		"Writes plain text files you point OBS \"Text (GDI+/FreeType)\" sources at with \"Read from file\". No browser source, no CPU cost, works on any OBS version.",
 		th.color.fg_muted, th.font.size_sm,
 	))
@@ -459,7 +628,7 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	// -- obs-websocket ------------------------------------------------------
 	append(&rows, skald.spacer(th.spacing.sm))
 	append(&rows, skald.section_header(ctx, "obs-websocket"))
-	append(&rows, skald.text(
+	append(&rows, paragraph(ctx,
 		"The way most OBS integrations work. Connects to OBS directly and pushes progress into text sources — enable the WebSocket server in OBS under Tools → WebSocket Server Settings.",
 		th.color.fg_muted, th.font.size_sm,
 	))
@@ -497,6 +666,7 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	return skald.scroll(ctx, {0, 0}, skald.col(
 		..rows[:],
 		spacing     = th.spacing.sm,
+		padding     = SCROLL_GUTTER,
 		cross_align = .Stretch,
 	))
 }
@@ -625,14 +795,6 @@ active_slot_label :: proc(ctx: ^skald.Ctx(Msg)) -> string {
 	return fmt.tprintf("%d — %s (RL %d)", s.index + 1, s.name, s.level)
 }
 
-theme_label :: proc(name: string) -> string {
-	switch name {
-	case "light":  return "Light"
-	case "system": return "Follow system"
-	case:          return "Dark"
-	}
-}
-
 overlay_mode_index :: proc(mode: string) -> int {
 	switch mode {
 	case "next":   return 1
@@ -658,6 +820,7 @@ overlay_bg_index :: proc(bg: string) -> int {
 
 on_tab_selected :: proc(i: int) -> Msg { return Tab_Selected(i) }
 on_toast_dismissed :: proc() -> Msg { return Toast_Dismissed{} }
+on_save_dialog_closed :: proc() -> Msg { return Save_Dialog_Closed{} }
 
 on_slot_selected :: proc(label: string) -> Msg {
 	// Labels are "<n> — <name> (RL <level>)"; the leading number is the
@@ -682,11 +845,11 @@ on_show_deaths :: proc(v: bool) -> Msg { return Show_Deaths_Set(v) }
 on_hide_completed :: proc(v: bool) -> Msg { return Hide_Completed_Set(v) }
 
 on_theme_selected :: proc(label: string) -> Msg {
-	switch label {
-	case "Light":         return Theme_Selected("light")
-	case "Follow system": return Theme_Selected("system")
-	case:                 return Theme_Selected("dark")
-	}
+	return Theme_Selected(theme_name_for_label(label))
+}
+
+on_ui_scale_selected :: proc(label: string) -> Msg {
+	return Ui_Scale_Selected(ui_scale_for_label(label))
 }
 
 on_server_set :: proc(v: bool) -> Msg { return Server_Set(v) }

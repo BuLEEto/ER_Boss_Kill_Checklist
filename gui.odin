@@ -34,10 +34,11 @@ Gui :: struct {
 	tab: Tab,
 	win: skald.Window_State,
 
-	// Setup tab
-	scanning:     bool,
-	scan_results: []Found_Save,
-	scan_ran:     bool,
+	// Save picker (modal)
+	save_dialog_open: bool,
+	scanning:         bool,
+	scan_results:     []Found_Save,
+	scan_ran:         bool,
 
 	// Checklist tab
 	expanded: [dynamic]bool, // per region index; shared by reference
@@ -76,6 +77,17 @@ Poll_Done :: struct {
 	err:       string, // heap; owned by update
 }
 
+Save_Dialog_Opened :: struct {}
+Save_Dialog_Closed :: struct {}
+
+// One click picks the file and the character together — the scan already
+// knows which characters each save holds, so making the user choose a
+// file and then hunt for the slot in a dropdown is a step for nothing.
+Save_Character_Picked :: struct {
+	save: int,
+	slot: int,
+}
+
 Scan_Requested :: struct {}
 Scan_Done :: struct {
 	saves: []Found_Save, // heap; owned by update
@@ -93,6 +105,7 @@ Poll_Rate_Changed :: distinct int
 Show_Deaths_Set :: distinct bool
 Hide_Completed_Set :: distinct bool
 Theme_Selected :: distinct string
+Ui_Scale_Selected :: distinct f32
 
 Region_Toggled :: distinct int
 Expand_All :: distinct bool
@@ -130,6 +143,9 @@ Msg :: union {
 	Tab_Selected,
 	Tick,
 	Poll_Done,
+	Save_Dialog_Opened,
+	Save_Dialog_Closed,
+	Save_Character_Picked,
 	Scan_Requested,
 	Scan_Done,
 	Scan_Result_Picked,
@@ -141,6 +157,7 @@ Msg :: union {
 	Show_Deaths_Set,
 	Hide_Completed_Set,
 	Theme_Selected,
+	Ui_Scale_Selected,
 	Region_Toggled,
 	Expand_All,
 	Server_Set,
@@ -234,6 +251,22 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		out = apply_poll_result(out, v)
 		return out, skald.cmd_delay(f32(app.settings.poll_seconds), Msg(Tick{}))
 
+	case Save_Dialog_Opened:
+		out.save_dialog_open = true
+		// Rescan on open so a character made since the last look shows up.
+		// It's ~100 ms and it runs on a worker, so there's no reason to
+		// serve a stale list.
+		if out.scanning do return out, {}
+		out.scanning = true
+		return out, skald.cmd_thread_simple(Msg, scan_worker)
+
+	case Save_Dialog_Closed:
+		out.save_dialog_open = false
+
+	case Save_Character_Picked:
+		if v.save < 0 || v.save >= len(out.scan_results) do return out, {}
+		out = gui_apply_save(out, out.scan_results[v.save].path, v.slot)
+
 	case Scan_Requested:
 		if out.scanning do return out, {}
 		out.scanning = true
@@ -244,14 +277,11 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		out.scan_ran = true
 		free_found_saves(out.scan_results)
 		out.scan_results = v.saves
-		if len(v.saves) == 0 {
-			out = gui_toast(out, "No Elden Ring saves found — use Browse to pick one", .Warning)
-		}
 
 	case Scan_Result_Picked:
 		idx := int(v)
 		if idx < 0 || idx >= len(out.scan_results) do return out, {}
-		out = gui_set_save_path(out, out.scan_results[idx].path)
+		out = gui_apply_save(out, out.scan_results[idx].path, -1)
 
 	case Browse_Requested:
 		// Filters are deliberately nil: SDL3's filtered-file-dialog path
@@ -272,7 +302,7 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 			)
 			return out, {}
 		}
-		out = gui_set_save_path(out, v.path)
+		out = gui_apply_save(out, v.path, -1)
 
 	case Slot_Selected:
 		sync.guard(&app.mu)
@@ -311,7 +341,17 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		delete(app.settings.theme)
 		app.settings.theme = strings.clone(string(v))
 		app_save_settings()
-		return out, skald.cmd_set_theme(Msg, theme_for_name(app.settings.theme))
+		return out, skald.cmd_set_theme(
+			Msg, theme_for_name(app.settings.theme, app.settings.ui_scale),
+		)
+
+	case Ui_Scale_Selected:
+		sync.guard(&app.mu)
+		app.settings.ui_scale = clamp(f32(v), UI_SCALE_MIN, UI_SCALE_MAX)
+		app_save_settings()
+		return out, skald.cmd_set_theme(
+			Msg, theme_for_name(app.settings.theme, app.settings.ui_scale),
+		)
 
 	case Region_Toggled:
 		i := int(v)
@@ -494,9 +534,22 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 // Helpers used by update
 // ----------------------------------------------------------------------------
 
-gui_set_save_path :: proc(s: Gui, path: string) -> Gui {
+// Load `path` and select `slot` in it. Pass slot = -1 for "work it out":
+// a save with exactly one character picks itself, otherwise the user is
+// left on Setup to choose.
+gui_apply_save :: proc(s: Gui, path: string, slot: int) -> Gui {
 	out := s
 	sync.guard(&app.mu)
+
+	// Re-picking the file you're already on shouldn't cost you your
+	// character. app_set_save_path clears the slot because a slot index
+	// is only meaningful within one file — so carry it over when the
+	// file hasn't actually changed.
+	slot := slot
+	if slot < 0 && path == app.settings.save_path {
+		slot = app.settings.active_slot
+	}
+
 	app_set_save_path(path)
 	app_save_settings()
 
@@ -504,25 +557,31 @@ gui_set_save_path :: proc(s: Gui, path: string) -> Gui {
 	out = gui_sync_expanded(out)
 
 	if len(app.save_error) > 0 {
+		// Leave the picker open — the user needs to choose something else.
 		return gui_toast(out, app.save_error, .Danger)
 	}
 
-	// A save with exactly one character can pick itself.
-	active := 0
-	only := -1
-	for sl in app.slots {
-		if !sl.active do continue
-		active += 1
-		only = sl.index
-	}
-	if active == 1 {
-		app_set_active_slot(only)
-		app_save_settings()
-		out = gui_after_data_change(out)
-		out.tab = .Checklist
-		return gui_toast(out, fmt.tprintf("Tracking %s", app.slots[only].name), .Success)
+	chosen := slot
+	if chosen < 0 {
+		active := 0
+		for sl in app.slots {
+			if !sl.active do continue
+			active += 1
+			chosen = sl.index
+		}
+		if active != 1 do chosen = -1
 	}
 
+	if chosen >= 0 && chosen < len(app.slots) && app.slots[chosen].active {
+		app_set_active_slot(chosen)
+		app_save_settings()
+		out = gui_after_data_change(out)
+		out.save_dialog_open = false
+		out.tab = .Checklist
+		return gui_toast(out, fmt.tprintf("Tracking %s", app.slots[chosen].name), .Success)
+	}
+
+	out.save_dialog_open = false
 	return gui_toast(out, "Save loaded — now pick a character", .Info)
 }
 
@@ -721,17 +780,6 @@ on_window_changed :: proc(ws: skald.Window_State) -> Msg {
 default_browse_location :: proc() -> string {
 	if len(app.settings.save_path) == 0 do return ""
 	return os.dir(app.settings.save_path)
-}
-
-theme_for_name :: proc(name: string) -> skald.Theme {
-	switch name {
-	case "light":
-		return skald.theme_light()
-	case "system":
-		return skald.system_theme() == .Light ? skald.theme_light() : skald.theme_dark()
-	case:
-		return skald.theme_dark()
-	}
 }
 
 on_system_theme_changed :: proc(t: skald.System_Theme) -> Msg {

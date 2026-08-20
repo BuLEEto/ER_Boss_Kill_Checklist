@@ -33,7 +33,10 @@ SETTINGS_FILE :: "settings.json"
 // newer versions are still loaded; fields we don't recognise are ignored
 // by the JSON decoder, and fields we expect but are absent keep the
 // defaults set up in default_settings().
-SETTINGS_VERSION :: 1
+//
+//   1  first version written to the config directory
+//   2  "elden" replaced "dark" as the default theme
+SETTINGS_VERSION :: 2
 
 Settings :: struct {
 	version: int `json:"version"`,
@@ -73,7 +76,8 @@ Settings :: struct {
 	window_w:         int    `json:"window_w"`,
 	window_h:         int    `json:"window_h"`,
 	window_maximized: bool   `json:"window_maximized"`,
-	theme:            string `json:"theme"`,           // dark | light | system
+	theme:            string `json:"theme"`,           // elden | dark | light | system
+	ui_scale:         f32    `json:"ui_scale"`,        // text + spacing multiplier
 	hide_completed:   bool   `json:"hide_completed"`,
 }
 
@@ -100,7 +104,8 @@ default_settings :: proc() -> Settings {
 		obsws_host    = "127.0.0.1",
 		obsws_port    = 4455,
 
-		theme = "dark",
+		theme    = "elden",
+		ui_scale = 1.15, // Skald's stock 14px body text is small on a big display
 	}
 }
 
@@ -198,6 +203,8 @@ load_settings_file :: proc(allocator := context.allocator) -> (s: Settings, err:
 		return s, nil
 	}
 
+	migrate_settings(&decoded)
+
 	s = decoded
 	// Strings came out of the temp arena; clone into the caller's.
 	s.save_path      = strings.clone(decoded.save_path, allocator)
@@ -211,6 +218,19 @@ load_settings_file :: proc(allocator := context.allocator) -> (s: Settings, err:
 
 	settings_apply_bounds(&s)
 	return s, nil
+}
+
+// Bring an older settings file forward. Runs against the decoded value
+// before it's cloned, so it's free to swap string fields around.
+migrate_settings :: proc(s: ^Settings) {
+	// v1 wrote theme "dark" as its default, which nobody chose — it was
+	// simply what the field started as. v2's default is the Elden Ring
+	// palette, so move those files over. Anyone who picked light or
+	// follow-system asked for it and is left alone.
+	if s.version < 2 && s.theme == "dark" {
+		s.theme = "elden"
+	}
+	s.version = SETTINGS_VERSION
 }
 
 save_settings_file :: proc(s: Settings) -> os.Error {
@@ -259,10 +279,15 @@ settings_apply_bounds :: proc(s: ^Settings) {
 	case:                            s.overlay_bg = "none"
 	}
 	switch s.theme {
-	case "dark", "light", "system": // fine
-	case:                           s.theme = "dark"
+	case "elden", "dark", "light", "system": // fine
+	case:                                    s.theme = "elden"
 	}
 	if len(s.obsws_host) == 0 do s.obsws_host = "127.0.0.1"
+
+	// Absent in files written before the setting existed, where the JSON
+	// decoder leaves the default in place — this only catches a hand-edit
+	// that put it out of range.
+	if s.ui_scale < UI_SCALE_MIN || s.ui_scale > UI_SCALE_MAX do s.ui_scale = 1.15
 }
 
 // ----------------------------------------------------------------------------

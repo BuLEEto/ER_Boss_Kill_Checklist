@@ -15,8 +15,10 @@ beaten — safe to use with EAC.
 - Multiple boss lists: all bosses, main story, remembrances, great runes, DLC,
   hardlock
 - Reads your death count and character level
-- Remembers your setup — save file, character, boss list, window size — between
-  restarts
+- Remembers your setup — save file, character, boss list, window size, theme —
+  between restarts
+- Elden Ring colour theme by default (Dark, Light and follow-the-OS also
+  available), with an adjustable text size
 - **Three OBS integrations**, use whichever suits you:
   - **Browser source** — the transparent overlay page, the best-looking option
   - **Text files** — plain text files for OBS "Text (GDI+/FreeType)" sources
@@ -66,11 +68,16 @@ package SDL3 yet.
 
 Run the app. On first launch:
 
-1. **Setup** tab → **Scan for saves**. It searches every Steam library it can
-   find, reads each save, and lists the characters in it. Pick the one you
-   want, or use **Browse…** if your save lives somewhere unusual.
-2. Choose your character and boss list.
+1. **Setup** tab → **Choose save file…**. A picker opens and searches every
+   Steam library it can find — including Proton prefixes, Flatpak Steam and
+   Seamless Co-op — reads each save, and lists the characters in it. Click a
+   character to start tracking it. **Browse…** is there if your save lives
+   somewhere unusual.
+2. Pick a boss list if you want something other than all bosses.
 3. **Checklist** tab shows progress; it updates itself while you play.
+
+Text feeling small? **Setup → Text size**. It scales the whole interface, not
+just the type.
 
 Everything you choose is saved immediately to your config directory, so the
 app comes back the way you left it:
@@ -128,6 +135,13 @@ password*, and it's stored in plain text, so leave it off on a shared machine.
 
 Handy on a single monitor: open the mobile URL from the OBS tab on your phone.
 
+### While you play
+
+Minimising the window doesn't stop any of it. The web server, the save polling,
+the text files and the obs-websocket pushes all keep running — only the drawing
+stops. The window idles at 0 fps and repaints solely when something changes, so
+leaving it open costs you effectively nothing.
+
 ### Save File Locations
 
 **Windows:**
@@ -157,6 +171,7 @@ For Seamless Co-op, the file is `ER0000.co2` under the mod's app ID instead of `
 | `obs_ws.odin` | obs-websocket v5 client |
 | `save_parser.odin` | Elden Ring save file parser (sequential binary format) |
 | `save_scan.odin` | Steam library / Proton prefix save discovery |
+| `theme.odin` | Elden Ring palette and the text-size scale |
 | `boss_data.odin` | Boss list loading and filtering |
 | `platform_*.odin` | LAN IP detection, per platform |
 | `src/libs/http/` | HTTP server library |
