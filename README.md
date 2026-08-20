@@ -105,10 +105,11 @@ Each panel has a **? How do I use this** button with step-by-step OBS
 instructions: which source type to add, where the setting lives, what each
 value is.
 
-Three settings are shared and live on **Browser source**, since that's where
-they're most visible: **Region** (which the text files and the `ER Region`
-sources follow too), **Align** and **Appearance** (which also style the
-web-style obs-websocket sources). The panels that borrow them say so.
+Each panel is self-contained: **Region** and **Appearance** belong to the
+integration, not to the app. The overlay can sit on Caelid in gold while the
+text files follow the first unfinished area and the websocket widgets show
+Altus Plateau at 64px — which is usually what you want when two of them are on
+screen at once, since you'd rarely show the same thing twice.
 
 ### Browser source (best looking)
 
@@ -116,8 +117,8 @@ Leave *Run the web server* on, pick your overlay mode (summary / next up /
 region) and background, then copy the URL into an OBS **Browser Source**. The
 page updates live over server-sent events — no refresh interval to tune.
 
-**Region** decides which area the Region overlay mode, `region.txt`,
-`region_bosses.txt` and the `ER Region` sources all follow:
+**Region** decides which area this integration shows. Each of the three has its
+own, set on its own panel:
 
 | | |
 |---|---|
@@ -125,8 +126,8 @@ page updates live over server-sent events — no refresh interval to tune.
 | *Auto — first unfinished* | The first area with anything left, in list order. |
 | A region by name | Pinned. Everything stays there until you change it. |
 
-A pin puts `&region=N` in the copied URL so the browser source agrees. The
-automatic modes deliberately leave it off — the server then resolves the area
+A pin puts `&region=N` in the copied overlay URL so the browser source agrees.
+The automatic modes deliberately leave it off — the server then resolves the area
 on every request, so the page keeps following instead of freezing on whichever
 area was current when you copied the URL. The pin is stored by name, so
 switching boss lists can't silently repoint it at a different area.
@@ -205,14 +206,17 @@ sources.
 
 #### Appearance
 
-**Appearance** on the OBS tab styles the overlay and every widget at once —
-accent colour, text colour, size, font family, outline, plus an
-**Advanced — custom CSS** box for anything else.
+**Appearance** styles the pages this app serves — accent colour, text colour,
+size, font family, outline, alignment, plus an **Advanced — custom CSS** box
+for anything else. There are two, one per panel: the overlay card has its own
+on **Browser source**, and the individual widgets have theirs on
+**obs-websocket** (visible when Source style is Web), so the two can look
+different.
 
 It lives in the app rather than being left to OBS for a specific reason: OBS's
 Custom CSS box belongs to a *single source*. With seven sources, theming
 through OBS means pasting the same rules seven times, and again on every tweak.
-The app serves the pages, so one change repaints all of them.
+The app serves the pages, so one change repaints all of that panel's.
 
 OBS's box still works, and still wins — it's injected after ours — which makes
 it the right place for a one-off override on one source:

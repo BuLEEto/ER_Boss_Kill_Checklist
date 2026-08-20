@@ -147,11 +147,11 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 			Help_Step{
 				"Styling them your way (Web)",
-				"Use Appearance on this tab — accent colour, text colour, size, font and outline apply to every source at once. That's the point of it being here: OBS's Custom CSS box belongs to one source, so styling seven through OBS means pasting the same rules seven times.\n\nAdvanced — custom CSS takes anything the controls don't cover. OBS's own box still works on top, per source, and still wins.",
+				"Appearance on this panel styles these sources — accent colour, text colour, size, font, outline, and a custom CSS box for anything else. It applies to all of them at once, which OBS can't do: its own Custom CSS box belongs to a single source.\n\nThe overlay card has its own separate Appearance on the Browser source panel, so the two can look different. OBS's box still works on top, per source, and still wins.",
 			},
 			Help_Step{
 				"Aligning them individually",
-				"Align on this tab sets them all at once. To differ per source, open that source's properties and change align=right in its URL to left or center — or put  body { text-align: center !important }  in its Custom CSS.",
+				"Align under Appearance on this panel sets all of these at once. To differ per source, open that source's properties in OBS and change align=right in its URL to left or center — or put  body { text-align: center !important }  in its Custom CSS.",
 			},
 			Help_Step{
 				"ER Overlay is the whole card",
@@ -159,7 +159,7 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 			Help_Step{
 				"Pick which area they follow",
-				"The Region setting under Browser source drives all of it. \"Where I last killed\" tracks you as you play; \"first unfinished\" walks the list in order; or pin an area and everything stays on it.",
+				"Region on this panel drives them. \"Where I last killed\" tracks you as you play; \"first unfinished\" walks the list in order; or pin an area and they stay on it. The other two integrations have their own Region, so they can follow different areas.",
 			},
 			Help_Step{
 				"Style and place them however you like",

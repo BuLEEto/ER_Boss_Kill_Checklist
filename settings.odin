@@ -49,7 +49,68 @@ POLL_SECONDS_DEFAULT :: 5
 //   3  obsws password encrypted at rest, under a new key name
 //   4  region pinned by name rather than index; per-source obsws toggles
 //   5  region selection grew a mode, so "pinned" is distinct from "auto"
-SETTINGS_VERSION :: 5
+//   6  region and appearance are per-integration rather than shared
+SETTINGS_VERSION :: 6
+
+// Which region an integration follows. One of these per integration
+// rather than one shared between them: the OBS tab has a panel per
+// integration, and a setting that lives on one panel but silently drives
+// the other two is the thing people trip over. Independent also matches
+// how they get used — someone running two integrations at once is
+// usually showing different things in each, not the same thing twice.
+//
+//   "first"      the first area with anything left, in list order
+//   "last_kill"  the area the most recent kill happened in
+//   "pinned"     `name`, chosen by the user
+//
+// Pinned by name rather than index because an index only means something
+// within one boss list.
+Region_Choice :: struct {
+	mode: string `json:"mode"`,
+	name: string `json:"name"`,
+}
+
+// How one of the served pages looks. The overlay card and the individual
+// widgets get one each, so they can differ — which is the usual case when
+// both are on screen at once.
+Appearance :: struct {
+	accent:      string `json:"accent"`,
+	text_color:  string `json:"text_color"`,
+	font_family: string `json:"font_family"`,
+	custom_css:  string `json:"custom_css"`,
+	font_size:   int    `json:"font_size"`,
+	outline:     bool   `json:"outline"`,
+	align:       string `json:"align"`, // left | center | right
+}
+
+default_appearance :: proc() -> Appearance {
+	return Appearance {
+		accent     = "#c8a84e", // Erdtree gold, matching the app
+		text_color = "#e0dcd0",
+		font_size  = 28,
+		outline    = true,
+		align      = "left",
+	}
+}
+
+appearance_apply_bounds :: proc(a: ^Appearance) {
+	if a.font_size < 8 || a.font_size > 200 do a.font_size = 28
+	if !is_hex_colour(a.accent) do a.accent = "#c8a84e"
+	if !is_hex_colour(a.text_color) do a.text_color = "#e0dcd0"
+	switch a.align {
+	case "left", "center", "right": // fine
+	case:                           a.align = "left"
+	}
+}
+
+region_choice_apply_bounds :: proc(r: ^Region_Choice) {
+	switch r.mode {
+	case "first", "last_kill", "pinned": // fine
+	case:                                r.mode = "first"
+	}
+	// A pin with nothing pinned is just auto.
+	if r.mode == "pinned" && len(r.name) == 0 do r.mode = "first"
+}
 
 Settings :: struct {
 	version: int `json:"version"`,
@@ -69,43 +130,20 @@ Settings :: struct {
 	overlay_mode:       string `json:"overlay_mode"`,       // summary | next | region
 	overlay_next_count: int    `json:"overlay_next_count"`,
 	overlay_bg:         string `json:"overlay_bg"`,         // none | green | magenta
-	overlay_align:      string `json:"overlay_align"`,      // left | center | right
 
-	// How the pages this app serves look. Applied server-side to the
-	// overlay and every widget at once — which is the whole point of
-	// having them here rather than leaving it to OBS. OBS's Custom CSS
-	// box is per source, so theming seven sources through it means
-	// pasting the same rules seven times, and again on every tweak.
-	//
-	// Colours are "#rrggbb". overlay_custom_css is appended last, so it
-	// wins over everything above it.
-	overlay_accent:      string `json:"overlay_accent"`,
-	overlay_text_color:  string `json:"overlay_text_color"`,
-	overlay_font_size:   int    `json:"overlay_font_size"`,
-	overlay_font_family: string `json:"overlay_font_family"`,
-	overlay_outline:     bool   `json:"overlay_outline"`,
-	overlay_custom_css:  string `json:"overlay_custom_css"`,
+	// Per-integration region and look. Each OBS panel owns its own, so no
+	// panel depends on a setting that lives on a different one.
+	browser_region: Region_Choice `json:"browser_region"`,
+	text_region:    Region_Choice `json:"text_region"`,
+	ws_region:      Region_Choice `json:"ws_region"`,
 
-	// Which region the Region overlay mode, ER Region and region.txt all
-	// follow:
-	//
-	//   "first"      the first area with anything left, in list order
-	//   "last_kill"  the area the most recent kill happened in
-	//   "pinned"     overlay_region_name, chosen by the user
-	//
-	// The pin is stored by name rather than index because an index only
-	// means anything within one boss list — switching from All bosses to
-	// DLC only would otherwise silently repoint it at a different area.
-	//
-	// (v3 and earlier wrote an unused "overlay_region" integer here. The
-	// decoder ignores the leftover key.)
-	overlay_region_mode: string `json:"overlay_region_mode"`,
-	overlay_region_name: string `json:"overlay_region_name"`,
+	browser_look: Appearance `json:"browser_look"`,
+	ws_look:      Appearance `json:"ws_look"`,
 
 	// The area the last kill we actually witnessed happened in. Written
-	// by the poller, persisted so "where I last killed" survives a
-	// restart — the save file records that a boss is dead, never when or
-	// in what order, so this is the only way to know.
+	// by the poller and shared by all three, because it's an observation
+	// rather than a preference — the save records that a boss is dead,
+	// never when or in what order, so this is the only way to know.
 	last_kill_region: string `json:"last_kill_region"`,
 
 	// OBS text-file output, for "Text (GDI+/FreeType)" sources set to
@@ -146,8 +184,9 @@ Settings :: struct {
 	// Blank line between entries in the multi-line outputs. OBS text
 	// sources have no line-height setting — it's been a feature request
 	// for years — so the only way to loosen them up is to send the extra
-	// line ourselves.
-	obs_roomy_lines: bool `json:"obs_roomy_lines"`,
+	// line ourselves. One per integration, same reasoning as the rest.
+	text_roomy_lines: bool `json:"text_roomy_lines"`,
+	ws_roomy_lines:   bool `json:"ws_roomy_lines"`,
 	// Encrypted at rest — see obsws_password_enc below and
 	// src/libs/sbcrypto. Held in memory decrypted.
 	obsws_password:          string `json:"obsws_password_enc"`,
@@ -178,16 +217,12 @@ default_settings :: proc() -> Settings {
 		overlay_mode        = "summary",
 		overlay_next_count  = 8,
 		overlay_bg          = "none",
-		overlay_align       = "left",
-		overlay_accent      = "#c8a84e", // Erdtree gold, matching the app
-		overlay_text_color  = "#e0dcd0",
-		overlay_font_size   = 28,
-		overlay_font_family = "",        // empty = the stylesheet's default stack
-		overlay_outline     = true,
-		overlay_custom_css  = "",
-		overlay_region_mode = "first",
-		overlay_region_name = "",
-		last_kill_region    = "",
+		browser_region   = {mode = "first"},
+		text_region      = {mode = "first"},
+		ws_region        = {mode = "first"},
+		browser_look     = default_appearance(),
+		ws_look          = default_appearance(),
+		last_kill_region = "",
 
 		obs_text_enabled = false,
 
@@ -204,7 +239,8 @@ default_settings :: proc() -> Settings {
 		obsws_send_overlay       = false,
 		obsws_source_style       = "text",
 
-		obs_roomy_lines = true,
+		text_roomy_lines = true,
+		ws_roomy_lines   = true,
 
 		theme    = "elden",
 		ui_scale = 1.15, // Skald's stock 14px body text is small on a big display
@@ -324,6 +360,7 @@ load_settings_file :: proc(allocator := context.allocator) -> (s: Settings, err:
 		}
 
 		s = decoded
+		migrate_v5(&s, raw)
 	}
 
 	migrate_settings(&s)
@@ -357,19 +394,28 @@ settings_own_strings :: proc(s: ^Settings, allocator := context.allocator) {
 		&s.boss_list,
 		&s.overlay_mode,
 		&s.overlay_bg,
-		&s.overlay_align,
 		&s.obsws_source_style,
-		&s.overlay_accent,
-		&s.overlay_text_color,
-		&s.overlay_font_family,
-		&s.overlay_custom_css,
-		&s.overlay_region_mode,
-		&s.overlay_region_name,
 		&s.last_kill_region,
 		&s.obs_text_dir,
 		&s.obsws_host,
 		&s.obsws_password,
 		&s.theme,
+		&s.browser_region.mode,
+		&s.browser_region.name,
+		&s.text_region.mode,
+		&s.text_region.name,
+		&s.ws_region.mode,
+		&s.ws_region.name,
+		&s.browser_look.accent,
+		&s.browser_look.text_color,
+		&s.browser_look.font_family,
+		&s.browser_look.custom_css,
+		&s.browser_look.align,
+		&s.ws_look.accent,
+		&s.ws_look.text_color,
+		&s.ws_look.font_family,
+		&s.ws_look.custom_css,
+		&s.ws_look.align,
 	}
 	for f in fields {
 		f^ = strings.clone(f^, allocator)
@@ -400,12 +446,54 @@ migrate_settings :: proc(s: ^Settings) {
 		s.theme = "elden"
 	}
 
-	// v4 had no mode: a non-empty region name was the only way to say
-	// "pinned", so that's what one means.
-	if s.version < 5 && len(s.overlay_region_mode) == 0 {
-		s.overlay_region_mode = len(s.overlay_region_name) > 0 ? "pinned" : "first"
-	}
+	// v5 and earlier had one region and one appearance shared by all three
+	// integrations. Nobody chose "shared" — it was just how it was built —
+	// so every integration inherits what was there and they diverge only
+	// when the user changes one.
+	// v5 → v6 is handled separately in migrate_v5, which needs the raw
+	// JSON: the keys it reads no longer exist on this struct, so by the
+	// time the decoder is done they're already gone.
 	s.version = SETTINGS_VERSION
+}
+
+// v5 and earlier had one region and one appearance shared by all three
+// integrations. v6 gives each its own, and everyone inherits what was
+// there — nobody chose "shared", it was just how it was built.
+//
+// This reads the raw JSON rather than the decoded struct because the keys
+// it wants (overlay_region_mode, overlay_accent, and the rest) aren't
+// fields any more. The decoder drops unknown keys silently, so anything
+// migrating from them has to look at the bytes.
+migrate_v5 :: proc(s: ^Settings, raw: []byte) {
+	root, err := json.parse(raw, allocator = context.temp_allocator)
+	if err != .None do return
+
+	// Nothing to do for a file already at v6 or later.
+	if json_int(root, "version") >= 6 do return
+
+	region := Region_Choice {
+		mode = json_string(root, "overlay_region_mode"),
+		name = json_string(root, "overlay_region_name"),
+	}
+	if len(region.mode) == 0 {
+		// v3 and earlier had no mode at all: a name meant "pinned".
+		region.mode = len(region.name) > 0 ? "pinned" : "first"
+	}
+
+	look := default_appearance()
+	if v := json_string(root, "overlay_accent"); len(v) > 0 do look.accent = v
+	if v := json_string(root, "overlay_text_color"); len(v) > 0 do look.text_color = v
+	if v := json_string(root, "overlay_font_family"); len(v) > 0 do look.font_family = v
+	if v := json_string(root, "overlay_custom_css"); len(v) > 0 do look.custom_css = v
+	if v := json_string(root, "overlay_align"); len(v) > 0 do look.align = v
+	if v := json_int(root, "overlay_font_size"); v > 0 do look.font_size = int(v)
+	look.outline = json_bool(root, "overlay_outline", true)
+
+	roomy := json_bool(root, "obs_roomy_lines", true)
+
+	s.browser_region, s.text_region, s.ws_region = region, region, region
+	s.browser_look, s.ws_look = look, look
+	s.text_roomy_lines, s.ws_roomy_lines = roomy, roomy
 }
 
 save_settings_file :: proc(s: Settings) -> os.Error {
@@ -461,18 +549,16 @@ settings_apply_bounds :: proc(s: ^Settings) {
 	case "none", "green", "magenta": // fine
 	case:                            s.overlay_bg = "none"
 	}
-	switch s.overlay_align {
-	case "left", "center", "right": // fine
-	case:                           s.overlay_align = "left"
-	}
 	switch s.obsws_source_style {
 	case "text", "web": // fine
 	case:               s.obsws_source_style = "text"
 	}
 
-	if s.overlay_font_size < 8 || s.overlay_font_size > 200 do s.overlay_font_size = 28
-	if !is_hex_colour(s.overlay_accent) do s.overlay_accent = "#c8a84e"
-	if !is_hex_colour(s.overlay_text_color) do s.overlay_text_color = "#e0dcd0"
+	region_choice_apply_bounds(&s.browser_region)
+	region_choice_apply_bounds(&s.text_region)
+	region_choice_apply_bounds(&s.ws_region)
+	appearance_apply_bounds(&s.browser_look)
+	appearance_apply_bounds(&s.ws_look)
 
 	switch s.theme {
 	case "elden", "dark", "light", "system": // fine
@@ -485,14 +571,6 @@ settings_apply_bounds :: proc(s: ^Settings) {
 	// that put it out of range.
 	if s.ui_scale < UI_SCALE_MIN || s.ui_scale > UI_SCALE_MAX do s.ui_scale = 1.15
 
-	switch s.overlay_region_mode {
-	case "first", "last_kill", "pinned": // fine
-	case:                                s.overlay_region_mode = "first"
-	}
-	// A pin with nothing pinned is just auto.
-	if s.overlay_region_mode == "pinned" && len(s.overlay_region_name) == 0 {
-		s.overlay_region_mode = "first"
-	}
 }
 
 // "#rrggbb", and nothing else. These go straight into a stylesheet, so a

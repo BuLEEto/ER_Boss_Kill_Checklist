@@ -62,8 +62,8 @@ Gui :: struct {
 	obsws_host_draft:   string,
 	obsws_port_draft:   string,
 	obsws_pass_draft:   string,
-	font_family_draft:  string,
-	custom_css_draft:   string,
+	font_family_draft:  [Look_Target]string,
+	custom_css_draft:   [Look_Target]string,
 
 	// Save-file polling
 	last_mtime: i64,
@@ -134,28 +134,38 @@ Port_Committed :: struct {}
 
 Overlay_Mode_Selected :: distinct string
 Overlay_Bg_Selected :: distinct string
-Overlay_Align_Selected :: distinct string
 Obs_Source_Style_Selected :: distinct string
 
-Overlay_Accent_Set :: distinct string
-Overlay_Text_Color_Set :: distinct string
-Overlay_Font_Size_Set :: distinct int
-Overlay_Outline_Set :: distinct bool
-Overlay_Font_Draft :: distinct string
-Overlay_Font_Committed :: struct {}
-Overlay_Css_Draft :: distinct string
-Overlay_Css_Committed :: struct {}
-Overlay_Theme_Reset :: struct {}
+Region_Selected :: struct {
+	target: Region_Target,
+	choice: string,
+}
+
+// Appearance edits all carry which panel they came from, so one set of
+// handlers serves the overlay and the widget pages without either
+// reaching into the other's settings.
+Look_Accent_Set :: struct { target: Look_Target, hex: string }
+Look_Text_Set :: struct { target: Look_Target, hex: string }
+Look_Size_Set :: struct { target: Look_Target, size: int }
+Look_Outline_Set :: struct { target: Look_Target, on: bool }
+Look_Align_Set :: struct { target: Look_Target, align: string }
+Look_Font_Draft :: struct { target: Look_Target, text: string }
+Look_Font_Committed :: struct { target: Look_Target }
+Look_Css_Draft :: struct { target: Look_Target, text: string }
+Look_Css_Committed :: struct { target: Look_Target }
+Look_Reset :: struct { target: Look_Target }
+
+Roomy_Lines_Set :: struct { websocket: bool, on: bool }
+
 Overlay_Count_Changed :: distinct int
-Overlay_Region_Selected :: distinct string
+Copy_Requested :: distinct string
+
 Obs_Source_Toggled :: struct {
 	kind: Obs_Source,
 	on:   bool,
 }
-Copy_Requested :: distinct string
 
 Obs_Text_Set :: distinct bool
-Roomy_Lines_Set :: distinct bool
 Obs_Text_Dir_Draft :: distinct string
 Obs_Text_Dir_Committed :: struct {}
 Obs_Text_Dir_Browse :: struct {}
@@ -205,19 +215,19 @@ Msg :: union {
 	Port_Committed,
 	Overlay_Mode_Selected,
 	Overlay_Bg_Selected,
-	Overlay_Align_Selected,
-	Obs_Source_Style_Selected,
-	Overlay_Accent_Set,
-	Overlay_Text_Color_Set,
-	Overlay_Font_Size_Set,
-	Overlay_Outline_Set,
-	Overlay_Font_Draft,
-	Overlay_Font_Committed,
-	Overlay_Css_Draft,
-	Overlay_Css_Committed,
-	Overlay_Theme_Reset,
 	Overlay_Count_Changed,
-	Overlay_Region_Selected,
+	Obs_Source_Style_Selected,
+	Region_Selected,
+	Look_Accent_Set,
+	Look_Text_Set,
+	Look_Size_Set,
+	Look_Outline_Set,
+	Look_Align_Set,
+	Look_Font_Draft,
+	Look_Font_Committed,
+	Look_Css_Draft,
+	Look_Css_Committed,
+	Look_Reset,
 	Obs_Source_Toggled,
 	Copy_Requested,
 	Obs_Text_Set,
@@ -252,8 +262,11 @@ gui_init :: proc() -> Gui {
 	g.obsws_host_draft   = strings.clone(app.settings.obsws_host)
 	g.obsws_pass_draft   = strings.clone(app.settings.obsws_password)
 	g.obs_text_dir_draft = strings.clone(app.settings.obs_text_dir)
-	g.font_family_draft  = strings.clone(app.settings.overlay_font_family)
-	g.custom_css_draft   = strings.clone(app.settings.overlay_custom_css)
+	for t in Look_Target {
+		look := settings_look(t)^
+		g.font_family_draft[t] = strings.clone(look.font_family)
+		g.custom_css_draft[t] = strings.clone(look.custom_css)
+	}
 
 	g.expanded = make([dynamic]bool, len(app.regions))
 	// Regions with something left to kill start open; finished ones
@@ -472,12 +485,22 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		settings_set_string(&app.settings.overlay_bg, string(v))
 		app_save_settings()
 
-	case Overlay_Align_Selected:
+	case Look_Align_Set:
 		sync.guard(&app.mu)
-		settings_set_string(&app.settings.overlay_align, string(v))
+		settings_set_string(&settings_look(v.target).align, v.align)
 		app_save_settings()
-		// The browser source's URL carries the alignment, so it needs
-		// resending for the change to reach OBS.
+		out = gui_theme_changed(out)
+
+	case Region_Selected:
+		sync.guard(&app.mu)
+		r := settings_region(v.target)
+		if v.choice == "first" || v.choice == "last_kill" {
+			settings_set_string(&r.mode, v.choice)
+		} else {
+			settings_set_string(&r.mode, "pinned")
+			settings_set_string(&r.name, v.choice)
+		}
+		app_save_settings()
 		out = gui_after_data_change(out)
 
 	case Overlay_Count_Changed:
@@ -485,20 +508,73 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		app.settings.overlay_next_count = clamp(int(v), 1, 50)
 		app_save_settings()
 
-	case Overlay_Region_Selected:
+	case Look_Accent_Set:
 		sync.guard(&app.mu)
-		choice := string(v)
-		if choice == "first" || choice == "last_kill" {
-			settings_set_string(&app.settings.overlay_region_mode, choice)
-		} else {
-			settings_set_string(&app.settings.overlay_region_mode, "pinned")
-			settings_set_string(&app.settings.overlay_region_name, choice)
-		}
+		settings_set_string(&settings_look(v.target).accent, v.hex)
 		app_save_settings()
-		// The region feeds the overlay, the text files and two OBS
-		// sources, so push the change everywhere rather than waiting for
-		// the next boss to die.
-		out = gui_after_data_change(out)
+		out = gui_theme_changed(out)
+
+	case Look_Text_Set:
+		sync.guard(&app.mu)
+		settings_set_string(&settings_look(v.target).text_color, v.hex)
+		app_save_settings()
+		out = gui_theme_changed(out)
+
+	case Look_Size_Set:
+		sync.guard(&app.mu)
+		settings_look(v.target).font_size = clamp(v.size, 12, 96)
+		app_save_settings()
+		out = gui_theme_changed(out)
+
+	case Look_Outline_Set:
+		sync.guard(&app.mu)
+		settings_look(v.target).outline = v.on
+		app_save_settings()
+		out = gui_theme_changed(out)
+
+	case Look_Font_Draft:
+		delete(out.font_family_draft[v.target])
+		out.font_family_draft[v.target] = strings.clone(v.text)
+
+	case Look_Font_Committed:
+		sync.guard(&app.mu)
+		settings_set_string(
+			&settings_look(v.target).font_family,
+			strings.trim_space(out.font_family_draft[v.target]),
+		)
+		app_save_settings()
+		out = gui_theme_changed(out)
+
+	case Look_Css_Draft:
+		delete(out.custom_css_draft[v.target])
+		out.custom_css_draft[v.target] = strings.clone(v.text)
+
+	case Look_Css_Committed:
+		sync.guard(&app.mu)
+		settings_set_string(
+			&settings_look(v.target).custom_css, out.custom_css_draft[v.target],
+		)
+		app_save_settings()
+		out = gui_theme_changed(out)
+
+	case Look_Reset:
+		sync.guard(&app.mu)
+		defaults := default_appearance()
+		look := settings_look(v.target)
+		settings_set_string(&look.accent, defaults.accent)
+		settings_set_string(&look.text_color, defaults.text_color)
+		settings_set_string(&look.font_family, "")
+		settings_set_string(&look.custom_css, "")
+		settings_set_string(&look.align, defaults.align)
+		look.font_size = defaults.font_size
+		look.outline = defaults.outline
+		app_save_settings()
+
+		delete(out.font_family_draft[v.target])
+		out.font_family_draft[v.target] = strings.clone("")
+		delete(out.custom_css_draft[v.target])
+		out.custom_css_draft[v.target] = strings.clone("")
+		out = gui_theme_changed(out)
 
 	case Obs_Source_Style_Selected:
 		sync.guard(&app.mu)
@@ -510,67 +586,6 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		if app.settings.obsws_enabled {
 			return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
 		}
-
-	case Overlay_Accent_Set:
-		sync.guard(&app.mu)
-		settings_set_string(&app.settings.overlay_accent, string(v))
-		app_save_settings()
-		out = gui_theme_changed(out)
-
-	case Overlay_Text_Color_Set:
-		sync.guard(&app.mu)
-		settings_set_string(&app.settings.overlay_text_color, string(v))
-		app_save_settings()
-		out = gui_theme_changed(out)
-
-	case Overlay_Font_Size_Set:
-		sync.guard(&app.mu)
-		app.settings.overlay_font_size = clamp(int(v), 12, 96)
-		app_save_settings()
-		out = gui_theme_changed(out)
-
-	case Overlay_Outline_Set:
-		sync.guard(&app.mu)
-		app.settings.overlay_outline = bool(v)
-		app_save_settings()
-		out = gui_theme_changed(out)
-
-	case Overlay_Font_Draft:
-		delete(out.font_family_draft)
-		out.font_family_draft = strings.clone(string(v))
-
-	case Overlay_Font_Committed:
-		sync.guard(&app.mu)
-		settings_set_string(
-			&app.settings.overlay_font_family, strings.trim_space(out.font_family_draft),
-		)
-		app_save_settings()
-		out = gui_theme_changed(out)
-
-	case Overlay_Css_Draft:
-		delete(out.custom_css_draft)
-		out.custom_css_draft = strings.clone(string(v))
-
-	case Overlay_Css_Committed:
-		sync.guard(&app.mu)
-		settings_set_string(&app.settings.overlay_custom_css, out.custom_css_draft)
-		app_save_settings()
-		out = gui_theme_changed(out)
-
-	case Overlay_Theme_Reset:
-		sync.guard(&app.mu)
-		defaults := default_settings()
-		settings_set_string(&app.settings.overlay_accent, defaults.overlay_accent)
-		settings_set_string(&app.settings.overlay_text_color, defaults.overlay_text_color)
-		settings_set_string(&app.settings.overlay_font_family, "")
-		settings_set_string(&app.settings.overlay_custom_css, "")
-		app.settings.overlay_font_size = defaults.overlay_font_size
-		app.settings.overlay_outline = defaults.overlay_outline
-		app_save_settings()
-
-		delete(out.font_family_draft); out.font_family_draft = strings.clone("")
-		delete(out.custom_css_draft);  out.custom_css_draft = strings.clone("")
-		out = gui_theme_changed(out)
 
 	case Obs_Source_Toggled:
 		sync.guard(&app.mu)
@@ -614,7 +629,11 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 
 	case Roomy_Lines_Set:
 		sync.guard(&app.mu)
-		app.settings.obs_roomy_lines = bool(v)
+		if v.websocket {
+			app.settings.ws_roomy_lines = v.on
+		} else {
+			app.settings.text_roomy_lines = v.on
+		}
 		app_save_settings()
 		out = gui_after_data_change(out)
 

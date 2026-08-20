@@ -528,7 +528,7 @@ obsws_widget_settings :: proc(kind: Obs_Source, with_size := false) -> string {
 	strings.write_string(&b, `{"url":"`)
 	json_escape_string(&b, fmt.tprintf(
 		"http://localhost:%d/widget?type=%s&align=%s",
-		app.server.port, obs_source_widget(kind), app.settings.overlay_align,
+		app.server.port, obs_source_widget(kind), app.settings.ws_look.align,
 	))
 	strings.write_string(&b, `"`)
 	if with_size {
@@ -752,7 +752,7 @@ obsws_push_update :: proc() {
 
 	region_text := "All regions cleared"
 	region_bosses := "All regions cleared"
-	if idx := app_focus_region(); idx >= 0 {
+	if idx := app_focus_region(app.settings.ws_region); idx >= 0 {
 		r := &app.regions[idx]
 		r_total, r_killed := count_region_bosses(r)
 		region_text = fmt.tprintf("%s (%d/%d)", r.region_name, r_killed, r_total)
@@ -762,7 +762,7 @@ obsws_push_update :: proc() {
 			if boss.killed do continue
 			append(&names, boss.boss)
 		}
-		region_bosses = obs_join_lines(names[:])
+		region_bosses = obs_join_lines(names[:], app.settings.ws_roomy_lines)
 	}
 
 	// Built per kind so the enum stays the single source of truth for
@@ -845,4 +845,11 @@ json_int :: proc(v: json.Value, key: string) -> i64 {
 	case json.Float:   return i64(n)
 	}
 	return 0
+}
+
+json_bool :: proc(v: json.Value, key: string, fallback: bool) -> bool {
+	child := json_object(v, key)
+	b, ok := child.(json.Boolean)
+	if !ok do return fallback
+	return bool(b)
 }

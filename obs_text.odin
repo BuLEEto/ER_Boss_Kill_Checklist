@@ -82,11 +82,11 @@ obs_text_write_all :: proc() -> os.Error {
 	for b in next {
 		append(&next_lines, fmt.tprintf("%s — %s", b.boss, b.place))
 	}
-	next_many := len(next) > 0 ? obs_join_lines(next_lines[:]) : "All bosses defeated"
+	next_many := len(next) > 0 ? obs_join_lines(next_lines[:], app.settings.text_roomy_lines) : "All bosses defeated"
 
 	region := "All regions cleared"
 	region_bosses := "All regions cleared"
-	if idx := app_focus_region(); idx >= 0 {
+	if idx := app_focus_region(app.settings.text_region); idx >= 0 {
 		r := &app.regions[idx]
 		r_total, r_killed := count_region_bosses(r)
 		region = fmt.tprintf("%s (%d/%d)", r.region_name, r_killed, r_total)
@@ -96,7 +96,7 @@ obs_text_write_all :: proc() -> os.Error {
 			if boss.killed do continue
 			append(&rb, boss.boss)
 		}
-		region_bosses = obs_join_lines(rb[:])
+		region_bosses = obs_join_lines(rb[:], app.settings.text_roomy_lines)
 	}
 
 	// Every region, in order, the way the overlay's summary mode lists
@@ -106,7 +106,7 @@ obs_text_write_all :: proc() -> os.Error {
 		r_total, r_killed := count_region_bosses(&r)
 		append(&region_lines, fmt.tprintf("%s %d/%d", r.region_name, r_killed, r_total))
 	}
-	all_regions := obs_join_lines(region_lines[:])
+	all_regions := obs_join_lines(region_lines[:], app.settings.text_roomy_lines)
 
 	contents := [?]string {
 		fmt.tprintf("%d / %d bosses", killed, total),

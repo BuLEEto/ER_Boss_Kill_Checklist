@@ -215,17 +215,18 @@ app_first_incomplete_region :: proc() -> int {
 	return -1
 }
 
-// The region every integration should be showing, or -1 when there's
-// nothing to show. See Settings.overlay_region_mode for the three modes.
+// The region an integration should be showing, or -1 when there's
+// nothing to show. Each integration passes its own choice — see
+// Settings.browser_region and friends.
 //
 // Both automatic modes fall through to "first unfinished" when they can't
 // answer: last_kill before the app has witnessed a kill, and pinned when
 // the pinned area isn't in the current boss list at all (pin Caelid,
 // switch to DLC only). Better a sensible area than none.
-app_focus_region :: proc() -> int {
-	switch app.settings.overlay_region_mode {
+app_focus_region :: proc(choice: Region_Choice) -> int {
+	switch choice.mode {
 	case "pinned":
-		if i := app_region_index(app.settings.overlay_region_name); i >= 0 do return i
+		if i := app_region_index(choice.name); i >= 0 do return i
 
 	case "last_kill":
 		if i := app_region_index(app.settings.last_kill_region); i >= 0 {
@@ -250,10 +251,10 @@ app_region_index :: proc(name: string) -> int {
 // The pinned region's name if it's still valid, otherwise "". The GUI
 // uses this so a stale pin shows as auto rather than as a region that
 // isn't in the list.
-app_focus_region_name :: proc() -> string {
-	if app.settings.overlay_region_mode != "pinned" do return ""
-	if app_region_index(app.settings.overlay_region_name) < 0 do return ""
-	return app.settings.overlay_region_name
+app_pinned_region_name :: proc(choice: Region_Choice) -> string {
+	if choice.mode != "pinned" do return ""
+	if app_region_index(choice.name) < 0 do return ""
+	return choice.name
 }
 
 // Record where a kill just happened. Returns true when this is new

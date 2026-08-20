@@ -197,7 +197,7 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 	// harmless and keeps a hand-written URL working.
 	align_param, _ := http.request_query(req, "align")
 	bg_param, _ := http.request_query(req, "bg")
-	align := len(align_param) > 0 ? align_param : app.settings.overlay_align
+	align := len(align_param) > 0 ? align_param : app.settings.browser_look.align
 	bg := len(bg_param) > 0 ? bg_param : app.settings.overlay_bg
 
 	classes := make([dynamic]string, context.temp_allocator)
@@ -229,7 +229,7 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 	// No region in the URL: fall back to whatever the app is pinned to,
 	// so a copied overlay URL and the OBS sources agree.
 	if mode == "region" && focus_region < 0 {
-		focus_region = app_focus_region()
+		focus_region = app_focus_region(app.settings.browser_region)
 		if focus_region < 0 do focus_region = 0
 	}
 
@@ -291,7 +291,7 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 		bosses            = bosses[:],
 		focus_region_name = focus_region_name,
 		body_class        = body_class,
-		theme_css         = overlay_theme_css(),
+		theme_css         = overlay_theme_css(app.settings.browser_look),
 	}
 
 	http.template_respond_with(res, tpl, data)
@@ -491,7 +491,7 @@ handle_widget :: proc(req: ^http.Request, res: ^http.Response) {
 
 	sync.shared_guard(&app.mu)
 
-	align := len(align_param) > 0 ? align_param : app.settings.overlay_align
+	align := len(align_param) > 0 ? align_param : app.settings.ws_look.align
 	body_class := ""
 	if align == "right" || align == "center" {
 		body_class = fmt.tprintf("align-%s", align)
@@ -521,7 +521,7 @@ handle_widget :: proc(req: ^http.Request, res: ^http.Response) {
 		// furniture when you already know what you put on screen.
 		show_label = label_param == "true",
 		body_class = body_class,
-		theme_css  = overlay_theme_css(),
+		theme_css  = overlay_theme_css(app.settings.ws_look),
 	}
 
 	http.template_respond_with(res, tpl, data)
@@ -558,14 +558,14 @@ widget_content :: proc(kind: string) -> (label: string, value: string, lines: []
 		if len(out) == 0 do append(&out, "All bosses defeated")
 		return "Next up", "", out[:]
 	case "region":
-		idx := app_focus_region()
+		idx := app_focus_region(app.settings.ws_region)
 		if idx < 0 do return "Region", "All regions cleared", nil
 		r_total, r_killed := count_region_bosses(&app.regions[idx])
 		return "Region", fmt.tprintf(
 			"%s (%d/%d)", app.regions[idx].region_name, r_killed, r_total,
 		), nil
 	case "region_bosses":
-		idx := app_focus_region()
+		idx := app_focus_region(app.settings.ws_region)
 		out := make([dynamic]string, context.temp_allocator)
 		if idx >= 0 {
 			for &b in app.regions[idx].bosses {
@@ -593,7 +593,7 @@ widget_content :: proc(kind: string) -> (label: string, value: string, lines: []
 // single source.
 // ----------------------------------------------------------------------------
 
-overlay_theme_css :: proc(allocator := context.temp_allocator) -> string {
+overlay_theme_css :: proc(look: Appearance, allocator := context.temp_allocator) -> string {
 	b := strings.builder_make(allocator)
 
 	// Colours ride on the same custom properties the stylesheet already
@@ -601,29 +601,29 @@ overlay_theme_css :: proc(allocator := context.temp_allocator) -> string {
 	fmt.sbprintf(
 		&b,
 		":root{{--gold:%s;--text:%s;}}",
-		app.settings.overlay_accent,
-		app.settings.overlay_text_color,
+		look.accent,
+		look.text_color,
 	)
 
 	fmt.sbprintf(
 		&b,
 		".widget-value,.widget-line{{font-size:%dpx;}}",
-		app.settings.overlay_font_size,
+		look.font_size,
 	)
 
-	if len(app.settings.overlay_font_family) > 0 {
+	if len(look.font_family) > 0 {
 		// Quoted, so a family name with spaces works without the user
 		// having to know CSS quoting rules.
-		fmt.sbprintf(&b, "body{{font-family:\"%s\";}}", css_safe(app.settings.overlay_font_family))
+		fmt.sbprintf(&b, "body{{font-family:\"%s\";}}", css_safe(look.font_family))
 	}
 
-	if !app.settings.overlay_outline {
+	if !look.outline {
 		strings.write_string(&b, ".widget-value,.widget-line{text-shadow:none;}")
 	}
 
-	if len(app.settings.overlay_custom_css) > 0 {
+	if len(look.custom_css) > 0 {
 		strings.write_string(&b, "\n")
-		strings.write_string(&b, css_safe(app.settings.overlay_custom_css))
+		strings.write_string(&b, css_safe(look.custom_css))
 	}
 
 	return strings.to_string(b)

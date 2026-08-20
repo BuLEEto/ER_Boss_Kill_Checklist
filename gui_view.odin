@@ -128,6 +128,7 @@ ID_OVERLAY_MODE   :: "obs.overlay_mode"
 ID_OVERLAY_COUNT  :: "obs.overlay_count"
 ID_OVERLAY_REGION :: "obs.overlay_region"
 ID_ROOMY_LINES    :: "obs.roomy_lines"
+ID_WS_ROOMY       :: "obs.ws_roomy"
 ID_OVERLAY_ALIGN  :: "obs.overlay_align"
 ID_SOURCE_STYLE   :: "obs.source_style"
 ID_OBS_TAB        :: "obs.subtab"
@@ -677,18 +678,7 @@ view_obs_browser :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		))
 	}
 
-	append(&rows, skald.form_row(ctx, "Region",
-		skald.select(
-			ctx, region_choice_label(), region_choice_labels(),
-			on_overlay_region, width = 280, id = skald.hash_id(ID_OVERLAY_REGION),
-		),
-		label_width = 120,
-	))
-	append(&rows, paragraph(ctx, region_choice_hint(), th.color.fg_muted, th.font.size_xs))
-	append(&rows, paragraph(ctx,
-		"Region is shared: the text files and the ER Region sources follow it too.",
-		th.color.fg_muted, th.font.size_xs,
-	))
+	for v in view_region_control(ctx, .Browser, "browser.region") do append(&rows, v)
 
 	append(&rows, skald.checkbox(
 		ctx, app.settings.show_deaths, "Include death count", on_show_deaths,
@@ -696,21 +686,6 @@ view_obs_browser :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	))
 
 	append(&rows, skald.spacer(th.spacing.sm))
-	append(&rows, skald.section_header(ctx, "How it looks"))
-
-	append(&rows, skald.form_row(ctx, "Align",
-		skald.segmented(
-			ctx, {"Left", "Centre", "Right"},
-			overlay_align_index(app.settings.overlay_align), on_overlay_align,
-			id = skald.hash_id(ID_OVERLAY_ALIGN),
-		),
-		label_width = 120,
-	))
-	append(&rows, paragraph(ctx,
-		"Aligns every line, which OBS's own text sources can't do at all — park the source against the right of your canvas and lists grow leftwards instead of out of frame.",
-		th.color.fg_muted, th.font.size_xs,
-	))
-
 	append(&rows, skald.form_row(ctx, "Background",
 		skald.segmented(
 			ctx, {"Transparent", "Green", "Magenta"},
@@ -724,7 +699,9 @@ view_obs_browser :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		th.color.fg_muted, th.font.size_xs,
 	))
 
-	for v in view_overlay_theme(s, ctx) do append(&rows, v)
+	looks := view_appearance(s, ctx, .Browser, "browser",
+		"How the overlay card looks. Only this page — the obs-websocket sources have their own.")
+	for v in looks do append(&rows, v)
 
 	append(&rows, skald.spacer(th.spacing.sm))
 	append(&rows, skald.section_header(ctx, "Add to OBS"))
@@ -772,12 +749,14 @@ view_obs_text :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	))
 
 	append(&rows, skald.spacer(th.spacing.sm))
+	for v in view_region_control(ctx, .Text, "text.region") do append(&rows, v)
+
 	append(&rows, skald.checkbox(
-		ctx, app.settings.obs_roomy_lines, "Blank line between entries in the multi-line files",
-		on_roomy_lines, id = skald.hash_id(ID_ROOMY_LINES),
+		ctx, app.settings.text_roomy_lines, "Blank line between entries in the multi-line files",
+		false, on_roomy_lines, id = skald.hash_id(ID_ROOMY_LINES),
 	))
 	append(&rows, paragraph(ctx,
-		"OBS text sources have no line-height setting, so the only way to loosen a list up is to send the extra line. Also applies to the multi-line obs-websocket sources.",
+		"OBS text sources have no line-height setting, so the only way to loosen a list up is to send the extra line.",
 		th.color.fg_muted, th.font.size_xs,
 	))
 
@@ -794,10 +773,6 @@ view_obs_text :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 			cross_align = .Center,
 		))
 	}
-	append(&rows, paragraph(ctx,
-		"region.txt and region_bosses.txt follow the Region setting on the Browser source tab.",
-		th.color.fg_muted, th.font.size_xs,
-	))
 
 	return skald.scroll(ctx, {0, 0}, skald.col(
 		..rows[:],
@@ -866,7 +841,7 @@ view_obs_websocket :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	))
 	append(&rows, paragraph(ctx,
 		app.settings.obsws_source_style == "web" \
-			? "Each value is its own small browser source, so alignment, line height and colours are real CSS — set on the Browser source tab, or per source with Custom CSS in OBS. Costs a browser instance per source." \
+			? "Each value is its own small browser source, so alignment, line height and colours are real CSS — see Appearance below. Costs a browser instance per source." \
 			: "OBS text sources: cheap, no browser instance, but OBS gives them no alignment and no line height. Switch to Web if you want lists that align.",
 		th.color.fg_muted, th.font.size_xs,
 	))
@@ -880,9 +855,22 @@ view_obs_websocket :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		))
 	}
 	append(&rows, paragraph(ctx,
-		"Unticking hides the source in OBS rather than deleting it, so anything you've styled survives — re-tick to bring it back. ER Region and ER Region Bosses follow the Region setting on the Browser source tab.",
+		"Unticking hides the source in OBS rather than deleting it, so anything you've styled survives — re-tick to bring it back.",
 		th.color.fg_muted, th.font.size_xs,
 	))
+
+	append(&rows, skald.spacer(th.spacing.sm))
+	for v in view_region_control(ctx, .Websocket, "ws.region") do append(&rows, v)
+	append(&rows, skald.checkbox(
+		ctx, app.settings.ws_roomy_lines, "Blank line between entries in the multi-line sources",
+		true, on_roomy_lines, id = skald.hash_id(ID_WS_ROOMY),
+	))
+
+	if app.settings.obsws_source_style == "web" {
+		looks := view_appearance(s, ctx, .Websocket, "ws",
+			"How the individual widget sources look. Only these — the overlay card has its own.")
+		for v in looks do append(&rows, v)
+	}
 
 	return skald.scroll(ctx, {0, 0}, skald.col(
 		..rows[:],
@@ -994,16 +982,17 @@ overlay_url_string :: proc(allocator := context.allocator) -> string {
 	// the server resolve it on every request, so the page keeps following
 	// along instead of freezing on whichever area was current when the
 	// URL was copied.
-	if app.settings.overlay_mode == "region" && len(app_focus_region_name()) > 0 {
-		if idx := app_focus_region(); idx >= 0 {
+	if app.settings.overlay_mode == "region" &&
+	   len(app_pinned_region_name(app.settings.browser_region)) > 0 {
+		if idx := app_focus_region(app.settings.browser_region); idx >= 0 {
 			fmt.sbprintf(&b, "&region=%d", idx)
 		}
 	}
 	if app.settings.overlay_bg != "none" {
 		fmt.sbprintf(&b, "&bg=%s", app.settings.overlay_bg)
 	}
-	if app.settings.overlay_align != "left" {
-		fmt.sbprintf(&b, "&align=%s", app.settings.overlay_align)
+	if app.settings.browser_look.align != "left" {
+		fmt.sbprintf(&b, "&align=%s", app.settings.browser_look.align)
 	}
 	if app.settings.show_deaths {
 		strings.write_string(&b, "&deaths=true")
@@ -1041,46 +1030,6 @@ overlay_mode_index :: proc(mode: string) -> int {
 	case "region": return 2
 	case:          return 0
 	}
-}
-
-REGION_FIRST_LABEL :: "Auto — first unfinished"
-REGION_LAST_KILL_LABEL :: "Auto — where I last killed"
-
-// Region names as the picker shows them, both automatic modes first.
-region_choice_labels :: proc(allocator := context.temp_allocator) -> []string {
-	out := make([dynamic]string, 0, len(app.regions) + 2, allocator)
-	append(&out, REGION_FIRST_LABEL, REGION_LAST_KILL_LABEL)
-	for &r in app.regions do append(&out, r.region_name)
-	return out[:]
-}
-
-region_choice_label :: proc() -> string {
-	switch app.settings.overlay_region_mode {
-	case "last_kill":
-		return REGION_LAST_KILL_LABEL
-	case "pinned":
-		if name := app_focus_region_name(); len(name) > 0 do return name
-	}
-	return REGION_FIRST_LABEL
-}
-
-// What the picker's explanatory line says, which depends on the mode —
-// last-kill in particular deserves saying out loud that it only knows
-// about kills the app was running for.
-region_choice_hint :: proc() -> string {
-	switch app.settings.overlay_region_mode {
-	case "last_kill":
-		if len(app.settings.last_kill_region) > 0 {
-			return fmt.tprintf(
-				"Following %s, where the last kill happened. Moves on its own as you play; falls back to the first unfinished area until the next kill once that one is cleared.",
-				app.settings.last_kill_region,
-			)
-		}
-		return "Follows whichever area you most recently killed something in. The save records that a boss is dead, never when — so this only counts kills the app was open for. Until then it shows the first unfinished area."
-	case "pinned":
-		return "Pinned. The overlay, the region text files and the ER Region sources all stay on this area until you change it."
-	}
-	return "Follows the first area you haven't finished, in list order. Pick \"where I last killed\" to have it track you instead, or pin an area."
 }
 
 overlay_bg_index :: proc(bg: string) -> int {
@@ -1158,36 +1107,13 @@ on_obs_source_style :: proc(i: int) -> Msg {
 	return Obs_Source_Style_Selected(i == 1 ? "web" : "text")
 }
 
-on_overlay_align :: proc(i: int) -> Msg {
-	switch i {
-	case 1:  return Overlay_Align_Selected("center")
-	case 2:  return Overlay_Align_Selected("right")
-	case:    return Overlay_Align_Selected("left")
-	}
-}
-
-overlay_align_index :: proc(a: string) -> int {
-	switch a {
-	case "center": return 1
-	case "right":  return 2
-	case:          return 0
-	}
-}
-
-on_overlay_region :: proc(label: string) -> Msg {
-	switch label {
-	case REGION_FIRST_LABEL:     return Overlay_Region_Selected("first")
-	case REGION_LAST_KILL_LABEL: return Overlay_Region_Selected("last_kill")
-	}
-	// Anything else is a region name, so it's a pin.
-	return Overlay_Region_Selected(label)
-}
-
 on_obs_source_toggled :: proc(kind: Obs_Source, on: bool) -> Msg {
 	return Obs_Source_Toggled{kind = kind, on = on}
 }
 
-on_roomy_lines :: proc(v: bool) -> Msg { return Roomy_Lines_Set(v) }
+on_roomy_lines :: proc(websocket: bool, v: bool) -> Msg {
+	return Roomy_Lines_Set{websocket = websocket, on = v}
+}
 
 on_obs_text_set :: proc(v: bool) -> Msg { return Obs_Text_Set(v) }
 on_obs_text_dir :: proc(v: string) -> Msg { return Obs_Text_Dir_Draft(v) }

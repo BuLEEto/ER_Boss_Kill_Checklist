@@ -55,7 +55,10 @@ json_escape_string :: proc(builder: ^strings.Builder, s: string) {
 // leading control, so a multi-line value renders with whatever the font
 // metrics give you, which is tight. The only lever we have is what we
 // send, so "roomy" puts a blank line between entries.
-obs_join_lines :: proc(lines: []string, allocator := context.temp_allocator) -> string {
-	sep := app.settings.obs_roomy_lines ? "\n\n" : "\n"
-	return strings.join(lines, sep, allocator)
+obs_join_lines :: proc(
+	lines: []string,
+	roomy: bool,
+	allocator := context.temp_allocator,
+) -> string {
+	return strings.join(lines, roomy ? "\n\n" : "\n", allocator)
 }
