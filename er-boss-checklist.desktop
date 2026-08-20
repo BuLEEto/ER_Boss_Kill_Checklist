@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=ER Boss Checklist
+Comment=Elden Ring boss kill tracker with OBS overlay
+Exec=/opt/er-boss-checklist/er-boss-checklist
+Icon=applications-games
+Terminal=false
+Type=Application
+Categories=Game;Utility;
+Keywords=elden;ring;boss;checklist;tracker;overlay;obs;

@@ -1,0 +1,308 @@
+package main
+
+import "core:encoding/json"
+import "core:fmt"
+import "core:os"
+import "core:path/filepath"
+import "core:strings"
+
+// ============================================================================
+// Settings
+//
+// Settings live in the per-user config directory, NOT next to the
+// executable:
+//
+//   Linux    $XDG_CONFIG_HOME/er-boss-checklist/settings.json
+//            (~/.config/er-boss-checklist/settings.json)
+//   Windows  %APPDATA%\er-boss-checklist\settings.json
+//
+// The old build wrote settings.json into the executable's own directory.
+// That silently failed for anyone running the packaged build, because
+// /opt/er-boss-checklist (and Program Files) are not user-writable — and
+// the write result was discarded, so nothing ever said so. Hence
+// "it forgets my save file every time I start it".
+//
+// Writes go through a temp file + rename so a crash mid-write can't
+// leave a truncated settings.json behind.
+// ============================================================================
+
+APP_CONFIG_DIR :: "er-boss-checklist"
+SETTINGS_FILE :: "settings.json"
+
+// Bumped when a field changes meaning and needs migrating. Unknown-but-
+// newer versions are still loaded; fields we don't recognise are ignored
+// by the JSON decoder, and fields we expect but are absent keep the
+// defaults set up in default_settings().
+SETTINGS_VERSION :: 1
+
+Settings :: struct {
+	version: int `json:"version"`,
+
+	// Save file + tracking
+	save_path:    string `json:"save_path"`,
+	active_slot:  int    `json:"active_slot"`,
+	boss_list:    string `json:"boss_list"`,
+	show_deaths:  bool   `json:"show_deaths"`,
+	poll_seconds: int    `json:"poll_seconds"`,
+
+	// Web server — serves the OBS overlay and the mobile companion page
+	server_enabled: bool `json:"server_enabled"`,
+	server_port:    int  `json:"server_port"`,
+
+	// Overlay defaults, mirrored into the URL the OBS tab hands out
+	overlay_mode:       string `json:"overlay_mode"`,       // summary | next | region
+	overlay_next_count: int    `json:"overlay_next_count"`,
+	overlay_region:     int    `json:"overlay_region"`,
+	overlay_bg:         string `json:"overlay_bg"`,         // none | green | magenta
+
+	// OBS text-file output, for "Text (GDI+/FreeType)" sources set to
+	// read from file
+	obs_text_enabled: bool   `json:"obs_text_enabled"`,
+	obs_text_dir:     string `json:"obs_text_dir"`,
+
+	// obs-websocket v5
+	obsws_enabled:           bool   `json:"obsws_enabled"`,
+	obsws_host:              string `json:"obsws_host"`,
+	obsws_port:              int    `json:"obsws_port"`,
+	obsws_remember_password: bool   `json:"obsws_remember_password"`,
+	obsws_password:          string `json:"obsws_password"`,
+
+	// GUI
+	window_x:         int    `json:"window_x"`,
+	window_y:         int    `json:"window_y"`,
+	window_w:         int    `json:"window_w"`,
+	window_h:         int    `json:"window_h"`,
+	window_maximized: bool   `json:"window_maximized"`,
+	theme:            string `json:"theme"`,           // dark | light | system
+	hide_completed:   bool   `json:"hide_completed"`,
+}
+
+default_settings :: proc() -> Settings {
+	return Settings {
+		version = SETTINGS_VERSION,
+
+		active_slot  = -1,
+		boss_list    = "standard",
+		show_deaths  = false,
+		poll_seconds = 3,
+
+		server_enabled = true,
+		server_port    = 3000,
+
+		overlay_mode       = "summary",
+		overlay_next_count = 8,
+		overlay_region     = -1,
+		overlay_bg         = "none",
+
+		obs_text_enabled = false,
+
+		obsws_enabled = false,
+		obsws_host    = "127.0.0.1",
+		obsws_port    = 4455,
+
+		theme = "dark",
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Paths
+// ----------------------------------------------------------------------------
+
+// filepath.join returns an allocator error we have nothing useful to do
+// with — an OOM here means the process is already finished. Fold it away
+// so the path-building code below stays readable.
+path_join :: proc(parts: []string, allocator := context.allocator) -> string {
+	joined, _ := filepath.join(parts, allocator)
+	return joined
+}
+
+// Directory holding settings.json and any other per-user state. Created
+// on demand. Falls back to the working directory if the platform can't
+// tell us where the config root is — better a settings file in an odd
+// place than no persistence at all.
+settings_dir :: proc(allocator := context.allocator) -> (dir: string, err: os.Error) {
+	root := os.user_config_dir(allocator, roaming = true) or_return
+	defer delete(root, allocator)
+
+	dir = path_join({root, APP_CONFIG_DIR}, allocator)
+	// "already there" is success. make_directory_all reports that as a
+	// platform errno rather than a portable value, so ask the filesystem
+	// instead of trying to match error codes per-OS.
+	if mk_err := os.make_directory_all(dir); mk_err != nil && !os.is_directory(dir) {
+		delete(dir, allocator)
+		return "", mk_err
+	}
+	return dir, nil
+}
+
+settings_path :: proc(allocator := context.allocator) -> (path: string, err: os.Error) {
+	dir := settings_dir(allocator) or_return
+	defer delete(dir, allocator)
+	return path_join({dir, SETTINGS_FILE}, allocator), nil
+}
+
+// ----------------------------------------------------------------------------
+// Migration from the old exe-relative location
+// ----------------------------------------------------------------------------
+
+// Older versions kept settings.json beside the executable. If one is
+// there and we don't have a config-dir copy yet, adopt it so upgrading
+// users keep their save path and slot. The original is left in place —
+// it may sit in a read-only install directory, and deleting it buys us
+// nothing.
+migrate_legacy_settings :: proc(dest: string) {
+	if os.exists(dest) do return
+
+	exe_dir, exe_err := os.get_executable_directory(context.temp_allocator)
+	if exe_err != nil do return
+
+	legacy := path_join({exe_dir, SETTINGS_FILE}, context.temp_allocator)
+	if !os.exists(legacy) do return
+
+	raw, read_err := os.read_entire_file(legacy, context.temp_allocator)
+	if read_err != nil do return
+
+	if write_err := write_file_atomic(dest, raw); write_err != nil {
+		fmt.eprintfln("Could not migrate settings from %s: %v", legacy, write_err)
+		return
+	}
+	fmt.printfln("Migrated settings from %s to %s", legacy, dest)
+}
+
+// ----------------------------------------------------------------------------
+// Load / save
+// ----------------------------------------------------------------------------
+
+// Reads settings from disk. Missing file is not an error — it just means
+// first run, and the caller gets defaults. A malformed file IS reported,
+// so a hand-edited settings.json that won't parse says so instead of
+// quietly resetting everything.
+load_settings_file :: proc(allocator := context.allocator) -> (s: Settings, err: os.Error) {
+	s = default_settings()
+
+	path := settings_path(context.temp_allocator) or_return
+	migrate_legacy_settings(path)
+
+	// First run: no file, no complaint. Checking existence up front keeps
+	// this portable — a missing file surfaces as a platform errno, not as
+	// a value we can match on.
+	if !os.exists(path) do return s, nil
+
+	raw, read_err := os.read_entire_file(path, context.temp_allocator)
+	if read_err != nil do return s, read_err
+
+	// Decode into a fresh value so absent keys keep their defaults.
+	decoded := default_settings()
+	if jerr := json.unmarshal(raw, &decoded, allocator = context.temp_allocator); jerr != nil {
+		fmt.eprintfln("settings.json could not be parsed (%v) — using defaults", jerr)
+		return s, nil
+	}
+
+	s = decoded
+	// Strings came out of the temp arena; clone into the caller's.
+	s.save_path      = strings.clone(decoded.save_path, allocator)
+	s.boss_list      = strings.clone(decoded.boss_list, allocator)
+	s.overlay_mode   = strings.clone(decoded.overlay_mode, allocator)
+	s.overlay_bg     = strings.clone(decoded.overlay_bg, allocator)
+	s.obs_text_dir   = strings.clone(decoded.obs_text_dir, allocator)
+	s.obsws_host     = strings.clone(decoded.obsws_host, allocator)
+	s.obsws_password = strings.clone(decoded.obsws_password, allocator)
+	s.theme          = strings.clone(decoded.theme, allocator)
+
+	settings_apply_bounds(&s)
+	return s, nil
+}
+
+save_settings_file :: proc(s: Settings) -> os.Error {
+	out := s
+	out.version = SETTINGS_VERSION
+	if !out.obsws_remember_password {
+		out.obsws_password = ""
+	}
+
+	data, jerr := json.marshal(out, {pretty = true}, context.temp_allocator)
+	if jerr != nil {
+		return .Invalid_File // marshal failure is a programming error, not an IO one
+	}
+
+	path := settings_path(context.temp_allocator) or_return
+	return write_file_atomic(path, data)
+}
+
+// Write via <path>.tmp + rename so readers never see a half-written file.
+write_file_atomic :: proc(path: string, data: []byte) -> os.Error {
+	tmp := strings.concatenate({path, ".tmp"}, context.temp_allocator)
+	os.write_entire_file(tmp, data) or_return
+
+	if err := os.rename(tmp, path); err != nil {
+		// Windows rename onto an existing file fails; clear and retry.
+		os.remove(path)
+		os.rename(tmp, path) or_return
+	}
+	return nil
+}
+
+// Clamp anything a hand-edited file could put out of range, so bad input
+// degrades to a working app rather than a broken one.
+settings_apply_bounds :: proc(s: ^Settings) {
+	if s.poll_seconds < 1 || s.poll_seconds > 60 do s.poll_seconds = 3
+	if s.server_port < 1 || s.server_port > 65535 do s.server_port = 3000
+	if s.obsws_port < 1 || s.obsws_port > 65535 do s.obsws_port = 4455
+	if s.overlay_next_count < 1 || s.overlay_next_count > 50 do s.overlay_next_count = 8
+
+	switch s.overlay_mode {
+	case "summary", "next", "region": // fine
+	case:                             s.overlay_mode = "summary"
+	}
+	switch s.overlay_bg {
+	case "none", "green", "magenta": // fine
+	case:                            s.overlay_bg = "none"
+	}
+	switch s.theme {
+	case "dark", "light", "system": // fine
+	case:                           s.theme = "dark"
+	}
+	if len(s.obsws_host) == 0 do s.obsws_host = "127.0.0.1"
+}
+
+// ----------------------------------------------------------------------------
+// Boss list name <-> enum
+// ----------------------------------------------------------------------------
+
+boss_list_from_name :: proc(name: string) -> Boss_List_Type {
+	switch name {
+	case "hardlock":        return .Hardlock
+	case "remembrance":     return .Remembrance
+	case "remembrance_dlc": return .Remembrance_DLC
+	case "great_runes":     return .Great_Runes
+	case "main_story":      return .Main_Story
+	case "dlc_only":        return .DLC_Only
+	case:                   return .Standard
+	}
+}
+
+boss_list_name :: proc(t: Boss_List_Type) -> string {
+	switch t {
+	case .Hardlock:        return "hardlock"
+	case .Remembrance:     return "remembrance"
+	case .Remembrance_DLC: return "remembrance_dlc"
+	case .Great_Runes:     return "great_runes"
+	case .Main_Story:      return "main_story"
+	case .DLC_Only:        return "dlc_only"
+	case .Standard:        return "standard"
+	}
+	return "standard"
+}
+
+boss_list_label :: proc(t: Boss_List_Type) -> string {
+	switch t {
+	case .Hardlock:        return "Hardlock (ranked by difficulty)"
+	case .Remembrance:     return "Remembrance bosses"
+	case .Remembrance_DLC: return "Remembrance bosses + DLC"
+	case .Great_Runes:     return "Great Rune bearers"
+	case .Main_Story:      return "Main story only"
+	case .DLC_Only:        return "DLC only"
+	case .Standard:        return "All bosses"
+	}
+	return "All bosses"
+}

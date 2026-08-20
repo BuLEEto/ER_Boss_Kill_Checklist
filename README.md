@@ -1,53 +1,132 @@
 # Elden Ring Boss Checklist
 
-A real-time boss kill tracker for Elden Ring with OBS overlay support. Reads your save file (**read-only**) to track which bosses you've defeated — safe to use with EAC.
+A native boss kill tracker for Elden Ring, with three ways to get your progress
+into OBS. Reads your save file (**read-only**) to work out which bosses you've
+beaten — safe to use with EAC.
+
+![The checklist tab](screenshots/checklist.png)
 
 ## Features
 
-- Automatically detects boss kills from your save file (**read-only**)
-- Multiple boss lists: all bosses, main story, remembrance, DLC, etc
-- Reads players death count & level
-- OBS-compatible transparent overlay (Can also be previewed to a browser and kept on a second screen without using OBS)
-- Mobile-friendly companion page (Useful for single monitor players)
-- Works on Linux and Windows
+- Native desktop app on Windows and Linux — no browser needed to use it
+- Detects boss kills from your save file (**read-only**), while you play
+- Finds your saves for you, including Proton prefixes, Flatpak Steam and
+  Seamless Co-op
+- Multiple boss lists: all bosses, main story, remembrances, great runes, DLC,
+  hardlock
+- Reads your death count and character level
+- Remembers your setup — save file, character, boss list, window size — between
+  restarts
+- **Three OBS integrations**, use whichever suits you:
+  - **Browser source** — the transparent overlay page, the best-looking option
+  - **Text files** — plain text files for OBS "Text (GDI+/FreeType)" sources
+    set to *Read from file*. Works on any OBS version, no browser source
+  - **obs-websocket** — connects to OBS directly and keeps text sources
+    updated, the way most OBS tools work
+- Mobile companion page for single-monitor players
 
 ## Building
 
-Requires the [Odin compiler](https://odin-lang.org/) (latest build dev-2026-03 recommended due to the core:os changes)
+Requires the [Odin compiler](https://odin-lang.org/) (a recent nightly — the
+app uses the merged `core:os` API), plus what Skald needs:
+
+- **Vulkan loader and driver** — `libvulkan1` + `mesa-vulkan-drivers` on Linux;
+  bundled with any modern GPU driver on Windows
+- **SDL3** — `libsdl3-0` on Linux; Odin's `vendor:sdl3` ships `SDL3.dll` on
+  Windows
+
+The GUI framework, [Skald](https://github.com/BuLEEto/Skald), is vendored at
+`vendor/skald/` — nothing to fetch.
 
 ### Linux
 
 ```bash
-make build
-```
-
-This produces a statically-linked `er-boss-checklist` binary.
-
-To build and run:
-
-```bash
-make run
+make build      # build ./er-boss-checklist
+make run        # build and run
+make tar        # release tarball, with libSDL3.so.0 bundled alongside
+make deb        # .deb that depends on the distro's libsdl3-0
 ```
 
 ### Windows
 
+From a Developer Command Prompt (MSVC on PATH):
+
 ```cmd
-odin build . -out:er-boss-checklist.exe
+odin build . -collection:gui=vendor/skald -o:speed -out:er-boss-checklist.exe
+copy "%ODIN_ROOT%\vendor\sdl3\SDL3.dll" .
 ```
+
+Cross-compiling from Linux doesn't work — SDL3 and Vulkan link through MSVC
+import libraries.
+
+See [BUILD.md](BUILD.md) for the full setup, including distros that don't
+package SDL3 yet.
 
 ## Usage
 
-```bash
-./er-boss-checklist
-```
+Run the app. On first launch:
 
-Open `http://localhost:3000` in your browser (if it doesn't open automatically). 
+1. **Setup** tab → **Scan for saves**. It searches every Steam library it can
+   find, reads each save, and lists the characters in it. Pick the one you
+   want, or use **Browse…** if your save lives somewhere unusual.
+2. Choose your character and boss list.
+3. **Checklist** tab shows progress; it updates itself while you play.
 
-Use the settings panel to configure your save file path and active character slot.
+Everything you choose is saved immediately to your config directory, so the
+app comes back the way you left it:
 
-### OBS Overlay
+| | |
+|---|---|
+| Linux | `~/.config/er-boss-checklist/settings.json` |
+| Windows | `%APPDATA%\er-boss-checklist\settings.json` |
 
-Add a Browser Source in OBS pointing to `http://localhost:3000/overlay`. The overlay has a configurable transparent background and updates in real-time.
+The **About** tab shows the exact path.
+
+## OBS
+
+All three options live on the **OBS** tab, and they can run at the same time.
+
+### Browser source (best looking)
+
+Leave *Run the web server* on, pick your overlay mode (summary / next up /
+region) and background, then copy the URL into an OBS **Browser Source**. The
+page updates live over server-sent events — no refresh interval to tune.
+
+Keep the background **Transparent** for a browser source. The green and magenta
+options exist for people capturing the page as a window instead, where a
+transparent background isn't possible and you need a chroma key.
+
+### Text files
+
+Turn on *Write text files* and point OBS **Text (GDI+)** / **Text (FreeType 2)**
+sources at them with *Read from file* ticked. No browser source, no extra CPU,
+works on every OBS version:
+
+| File | Contents |
+|---|---|
+| `progress.txt` | `113 / 207 bosses` |
+| `killed.txt` / `total.txt` / `remaining.txt` | just the number |
+| `percent.txt` | `54%` |
+| `deaths.txt` | death count |
+| `character.txt` | `Moo Moo Ruka — RL 113` |
+| `next_boss.txt` | the next boss still standing |
+| `next_bosses.txt` | the next few, one per line |
+| `region.txt` | first unfinished region and its count |
+
+### obs-websocket
+
+Enable OBS's own WebSocket server (**Tools → WebSocket Server Settings**), then
+enter the host, port and password on the OBS tab and hit **Connect**. The app
+creates four text sources in your current scene — `ER Progress`, `ER Next Boss`,
+`ER Deaths`, `ER Character` — and keeps them updated. Style and position them in
+OBS however you like; the app only ever changes their text.
+
+The password is only written to `settings.json` if you tick *Remember the
+password*, and it's stored in plain text, so leave it off on a shared machine.
+
+### Mobile companion
+
+Handy on a single monitor: open the mobile URL from the OBS tab on your phone.
 
 ### Save File Locations
 
@@ -68,18 +147,28 @@ For Seamless Co-op, the file is `ER0000.co2` under the mod's app ID instead of `
 
 | File | Purpose |
 |------|---------|
-| `main.odin` | HTTP server, routes, SSE events, settings management |
-| `save_parser.odin` | Elden Ring save file parser (sequential binary format parsing) |
+| `main.odin` | Startup: load data, settings, server, hand off to the GUI |
+| `gui.odin` | GUI state, messages, update — the only writer of shared state |
+| `gui_view.odin` | GUI layout for all four tabs |
+| `app_state.odin` | Shared state and its threading contract |
+| `settings.odin` | Config-directory settings, with migration from older builds |
+| `server.odin` | Web server for the OBS overlay and mobile page |
+| `obs_text.odin` | Text-file output for OBS text sources |
+| `obs_ws.odin` | obs-websocket v5 client |
+| `save_parser.odin` | Elden Ring save file parser (sequential binary format) |
+| `save_scan.odin` | Steam library / Proton prefix save discovery |
 | `boss_data.odin` | Boss list loading and filtering |
-| `platform_linux.odin` | Linux-specific LAN IP detection |
-| `platform_windows.odin` | Windows-specific LAN IP detection |
+| `platform_*.odin` | LAN IP detection, per platform |
+| `src/libs/http/` | HTTP server library |
+| `src/libs/websocket/` | Minimal RFC 6455 client, for obs-websocket |
+| `vendor/skald/` | Skald GUI framework (vendored, zlib) |
 | `bosses.json` | Boss definitions with event flag IDs |
 | `hardlock.json` | Hard-lock boss progression data |
 | `eventflag_bst.txt` | Event flag BST lookup table |
-| `templates/` | HTML templates (main page, overlay, mobile) |
-| `static/` | CSS and JavaScript |
+| `templates/`, `static/` | Overlay and mobile pages |
 
-The parser was built by cross-referencing three independent format implementations. 
+The parser was built by cross-referencing three independent format
+implementations.
 
 See [THIRD_PARTY.md](THIRD_PARTY.md) for full credits and licenses.
 

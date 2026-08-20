@@ -100,14 +100,23 @@ load_bst_map :: proc(path: string, allocator := context.allocator) -> (BST_Map, 
 // ============================================================================
 
 open_save_file :: proc(path: string, allocator := context.allocator) -> (Save_File, bool) {
-	save: Save_File
-	save.path = path
-
 	raw, read_err := os.read_entire_file(path, allocator)
 	if read_err != nil {
 		fmt.eprintln("Failed to read save file:", path)
-		return save, false
+		return Save_File{path = path}, false
 	}
+	return parse_save_bytes(path, raw, allocator)
+}
+
+// Parse an already-read save. Split out of open_save_file so the
+// background poller can hand over bytes it read on a worker thread
+// without going back to disk on the GUI thread.
+//
+// Takes ownership of `raw` on success; on failure the caller still owns
+// it (the returned Save_File carries it so close_save_file can free it).
+parse_save_bytes :: proc(path: string, raw: []u8, allocator := context.allocator) -> (Save_File, bool) {
+	save: Save_File
+	save.path = path
 	save.raw_data = raw
 
 	if len(raw) < BND4_HEADER_SIZE {
