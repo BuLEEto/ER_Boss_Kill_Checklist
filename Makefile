@@ -76,21 +76,32 @@ tar: sdl3
 	tar -czf $(TAR_DIR).tar.gz $(TAR_DIR)/
 	@echo "Built $(TAR_DIR).tar.gz"
 
-# The .deb declares libsdl3-0 as a dependency rather than bundling it —
-# apt can satisfy it on the distros that ship a .deb-shaped SDL3.
-deb: build
+# The .deb bundles SDL3 rather than depending on it.
+#
+# libsdl3-0 only exists on Debian 13+, Fedora 40+ and the rolling distros;
+# Ubuntu 24.04 LTS and Debian 12 have no SDL3 package at all, so a
+# dependency on it makes the package refuse to install on the machines
+# most likely to be handed a .deb. The binary already carries
+# RPATH=$ORIGIN, and glibc resolves that against the executable's real
+# path — so a copy sitting in /opt/er-boss-checklist is found even when
+# the app is launched through the /usr/local/bin symlink.
+#
+# Costs ~1.5 MB and shadows any system SDL3, which is the intent: one
+# package that installs and runs on any Debian-family machine with a
+# working Vulkan driver.
+deb: sdl3
 	rm -rf $(DEB_DIR)
 	mkdir -p $(DEB_DIR)/DEBIAN
 	mkdir -p $(DEB_DIR)$(OPT_DIR)/templates
 	mkdir -p $(DEB_DIR)$(OPT_DIR)/static
 	mkdir -p $(DEB_DIR)/usr/local/bin
 	mkdir -p $(DEB_DIR)/usr/share/applications
-	cp $(APP_NAME) $(DATA_FILES) $(DEB_DIR)$(OPT_DIR)/
+	cp $(APP_NAME) libSDL3.so.0 $(DATA_FILES) $(DEB_DIR)$(OPT_DIR)/
 	cp -r templates/* $(DEB_DIR)$(OPT_DIR)/templates/
 	cp -r static/* $(DEB_DIR)$(OPT_DIR)/static/
 	cp $(APP_NAME).desktop $(DEB_DIR)/usr/share/applications/
 	ln -sf $(OPT_DIR)/$(APP_NAME) $(DEB_DIR)/usr/local/bin/$(APP_NAME)
-	printf 'Package: $(APP_NAME)\nVersion: $(VERSION)\nSection: games\nPriority: optional\nArchitecture: $(ARCH)\nDepends: libsdl3-0, libvulkan1\nMaintainer: support@haxenabled.net\nDescription: Elden Ring Boss Checklist\n Native boss kill tracker with OBS overlay, text-file and\n obs-websocket output. Reads save files in read-only mode\n (safe with EAC).\n' > $(DEB_DIR)/DEBIAN/control
+	printf 'Package: $(APP_NAME)\nVersion: $(VERSION)\nSection: games\nPriority: optional\nArchitecture: $(ARCH)\nDepends: libvulkan1\nMaintainer: support@haxenabled.net\nDescription: Elden Ring Boss Checklist\n Native boss kill tracker with OBS overlay, text-file and\n obs-websocket output. Reads save files in read-only mode\n (safe with EAC).\n .\n SDL3 is bundled, so this installs on distributions that do not\n package it. Needs a working Vulkan driver.\n' > $(DEB_DIR)/DEBIAN/control
 	printf '#!/bin/sh\nupdate-desktop-database /usr/share/applications 2>/dev/null || true\n' > $(DEB_DIR)/DEBIAN/postinst
 	printf '#!/bin/sh\nupdate-desktop-database /usr/share/applications 2>/dev/null || true\n' > $(DEB_DIR)/DEBIAN/postrm
 	chmod 755 $(DEB_DIR)/DEBIAN/postinst $(DEB_DIR)/DEBIAN/postrm
