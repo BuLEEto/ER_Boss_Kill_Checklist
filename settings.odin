@@ -248,52 +248,101 @@ migrate_legacy_settings :: proc(dest: string) {
 load_settings_file :: proc(allocator := context.allocator) -> (s: Settings, err: os.Error) {
 	s = default_settings()
 
-	path := settings_path(context.temp_allocator) or_return
+	path, path_err := settings_path(context.temp_allocator)
+	if path_err != nil {
+		settings_own_strings(&s, allocator)
+		return s, path_err
+	}
 	migrate_legacy_settings(path)
 
 	// First run: no file, no complaint. Checking existence up front keeps
 	// this portable — a missing file surfaces as a platform errno, not as
 	// a value we can match on.
-	if !os.exists(path) do return s, nil
+	if os.exists(path) {
+		raw, read_err := os.read_entire_file(path, context.temp_allocator)
+		if read_err != nil {
+			settings_own_strings(&s, allocator)
+			return s, read_err
+		}
 
-	raw, read_err := os.read_entire_file(path, context.temp_allocator)
-	if read_err != nil do return s, read_err
+		// Decode into a fresh value so absent keys keep their defaults.
+		decoded := default_settings()
+		if jerr := json.unmarshal(raw, &decoded, allocator = context.temp_allocator); jerr != nil {
+			fmt.eprintfln("settings.json could not be parsed (%v) — using defaults", jerr)
+			settings_own_strings(&s, allocator)
+			return s, nil
+		}
 
-	// Decode into a fresh value so absent keys keep their defaults.
-	decoded := default_settings()
-	if jerr := json.unmarshal(raw, &decoded, allocator = context.temp_allocator); jerr != nil {
-		fmt.eprintfln("settings.json could not be parsed (%v) — using defaults", jerr)
-		return s, nil
+		// A password that won't open is one this machine didn't write:
+		// another machine's config, a corrupted file, or a plaintext
+		// password from a version before this field was encrypted. In
+		// every case the right move is to drop it and let the user
+		// re-enter it once.
+		if plain, ok := sb.decrypt_string(decoded.obsws_password, context.temp_allocator); ok {
+			decoded.obsws_password = plain
+		} else {
+			decoded.obsws_password = ""
+		}
+
+		s = decoded
 	}
 
-	migrate_settings(&decoded)
-
-	s = decoded
-	// Strings came out of the temp arena; clone into the caller's.
-	s.save_path      = strings.clone(decoded.save_path, allocator)
-	s.boss_list      = strings.clone(decoded.boss_list, allocator)
-	s.overlay_mode   = strings.clone(decoded.overlay_mode, allocator)
-	s.overlay_bg     = strings.clone(decoded.overlay_bg, allocator)
-	s.overlay_region_mode = strings.clone(decoded.overlay_region_mode, allocator)
-	s.overlay_region_name = strings.clone(decoded.overlay_region_name, allocator)
-	s.last_kill_region    = strings.clone(decoded.last_kill_region, allocator)
-	s.obs_text_dir   = strings.clone(decoded.obs_text_dir, allocator)
-	s.obsws_host     = strings.clone(decoded.obsws_host, allocator)
-
-	// A value that won't open is one this machine didn't write: another
-	// machine's config, a corrupted file, or a plaintext password from a
-	// version before this field was encrypted. In every case the right
-	// move is to drop it and let the user re-enter it once.
-	if plain, ok := sb.decrypt_string(decoded.obsws_password, allocator); ok {
-		s.obsws_password = plain
-	} else {
-		s.obsws_password = strings.clone("", allocator)
-	}
-	s.theme          = strings.clone(decoded.theme, allocator)
-
+	migrate_settings(&s)
 	settings_apply_bounds(&s)
+
+	// Last, and on every path out of here: see settings_own_strings.
+	settings_own_strings(&s, allocator)
 	return s, nil
 }
+
+// Make every string in `s` heap-owned by `allocator`.
+//
+// This has to be the last thing load does, and it has to happen on every
+// return path, because the app frees these strings when the user changes
+// a setting. Anything still pointing at a string literal — and there are
+// three sources of those: default_settings, migrate_settings, and
+// settings_apply_bounds clamping a bad value — would have free() called
+// on a pointer into read-only memory.
+//
+// That is not a leak-shaped bug, it's an abort. It bit "where I last
+// killed" hardest because last_kill_region defaults to a literal "" and
+// the first kill of the session frees it, but the same landmine sat
+// under theme, overlay mode, overlay background, obs-websocket host and
+// the text-file directory.
+//
+// Strings coming out of json.unmarshal live in the temp arena, so they
+// need copying here regardless.
+settings_own_strings :: proc(s: ^Settings, allocator := context.allocator) {
+	fields := [?]^string {
+		&s.save_path,
+		&s.boss_list,
+		&s.overlay_mode,
+		&s.overlay_bg,
+		&s.overlay_region_mode,
+		&s.overlay_region_name,
+		&s.last_kill_region,
+		&s.obs_text_dir,
+		&s.obsws_host,
+		&s.obsws_password,
+		&s.theme,
+	}
+	for f in fields {
+		f^ = strings.clone(f^, allocator)
+	}
+}
+
+// Replace a settings string, freeing what was there.
+//
+// Every string in the live settings is heap-owned (settings_own_strings
+// guarantees it at load), so the delete is always safe — and routing
+// changes through here keeps it that way rather than relying on each
+// call site to remember the delete/clone pair.
+settings_set_string :: proc(dst: ^string, value: string) {
+	if dst^ == value do return
+	delete(dst^)
+	dst^ = strings.clone(value)
+}
+
 
 // Bring an older settings file forward. Runs against the decoded value
 // before it's cloned, so it's free to swap string fields around.

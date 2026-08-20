@@ -355,8 +355,7 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 
 	case Theme_Selected:
 		sync.guard(&app.mu)
-		delete(app.settings.theme)
-		app.settings.theme = strings.clone(string(v))
+		settings_set_string(&app.settings.theme, string(v))
 		app_save_settings()
 		return out, skald.cmd_set_theme(
 			Msg, theme_for_name(app.settings.theme, app.settings.ui_scale),
@@ -421,14 +420,12 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 
 	case Overlay_Mode_Selected:
 		sync.guard(&app.mu)
-		delete(app.settings.overlay_mode)
-		app.settings.overlay_mode = strings.clone(string(v))
+		settings_set_string(&app.settings.overlay_mode, string(v))
 		app_save_settings()
 
 	case Overlay_Bg_Selected:
 		sync.guard(&app.mu)
-		delete(app.settings.overlay_bg)
-		app.settings.overlay_bg = strings.clone(string(v))
+		settings_set_string(&app.settings.overlay_bg, string(v))
 		app_save_settings()
 
 	case Overlay_Count_Changed:
@@ -439,13 +436,11 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 	case Overlay_Region_Selected:
 		sync.guard(&app.mu)
 		choice := string(v)
-		delete(app.settings.overlay_region_mode)
 		if choice == "first" || choice == "last_kill" {
-			app.settings.overlay_region_mode = strings.clone(choice)
+			settings_set_string(&app.settings.overlay_region_mode, choice)
 		} else {
-			app.settings.overlay_region_mode = strings.clone("pinned")
-			delete(app.settings.overlay_region_name)
-			app.settings.overlay_region_name = strings.clone(choice)
+			settings_set_string(&app.settings.overlay_region_mode, "pinned")
+			settings_set_string(&app.settings.overlay_region_name, choice)
 		}
 		app_save_settings()
 		// The region feeds the overlay, the text files and two OBS
@@ -513,8 +508,9 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 
 	case Obs_Text_Dir_Committed:
 		sync.guard(&app.mu)
-		delete(app.settings.obs_text_dir)
-		app.settings.obs_text_dir = strings.clone(strings.trim_space(out.obs_text_dir_draft))
+		settings_set_string(
+			&app.settings.obs_text_dir, strings.trim_space(out.obs_text_dir_draft),
+		)
 		app_save_settings()
 		if app.settings.obs_text_enabled {
 			if err := obs_text_write_all(); err != nil {
@@ -558,11 +554,11 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 			return out, {}
 		}
 		sync.guard(&app.mu)
-		delete(app.settings.obsws_host)
-		app.settings.obsws_host = strings.clone(strings.trim_space(out.obsws_host_draft))
+		settings_set_string(
+			&app.settings.obsws_host, strings.trim_space(out.obsws_host_draft),
+		)
 		app.settings.obsws_port = port
-		delete(app.settings.obsws_password)
-		app.settings.obsws_password = strings.clone(out.obsws_pass_draft)
+		settings_set_string(&app.settings.obsws_password, out.obsws_pass_draft)
 		app.settings.obsws_enabled = true
 		app_save_settings()
 		return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)

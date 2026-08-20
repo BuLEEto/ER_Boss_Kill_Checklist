@@ -259,8 +259,7 @@ app_focus_region_name :: proc() -> string {
 // information worth persisting.
 app_note_kill_region :: proc(name: string) -> bool {
 	if len(name) == 0 || name == app.settings.last_kill_region do return false
-	delete(app.settings.last_kill_region)
-	app.settings.last_kill_region = strings.clone(name)
+	settings_set_string(&app.settings.last_kill_region, name)
 	return true
 }
 
@@ -292,8 +291,7 @@ app_apply_settings :: proc(s: Settings) {
 }
 
 app_set_save_path :: proc(path: string) {
-	if len(app.settings.save_path) > 0 do delete(app.settings.save_path)
-	app.settings.save_path = strings.clone(path)
+	settings_set_string(&app.settings.save_path, path)
 	// A new file means the old slot index is meaningless.
 	app.settings.active_slot = -1
 	app_reload_save()
