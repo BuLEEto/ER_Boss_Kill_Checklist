@@ -30,6 +30,11 @@ SDL3.dll
 *.co2
 *.rd2
 
+# Reference material kept alongside the source but not part of it.
+# er-save-manager is Hapfel's Python project, cross-referenced when working
+# on the save parser and credited in THIRD_PARTY.md.
+/er-save-manager-main/
+
 # Editor / tooling
 .claude/settings.local.json
 .DS_Store

@@ -51,7 +51,12 @@ clean:
 # linked in the RUNPATH that makes the loader find it.
 # ----------------------------------------------------------------------------
 
+# Clear any previous bundle before probing: with RUNPATH=$ORIGIN in play, a
+# libSDL3.so.0 left here from the last run is what ldd resolves to, and it
+# reports that one without a path — so the probe would find nothing and the
+# target would fail on every run after the first.
 sdl3: build
+	@rm -f libSDL3.so.0
 	@sdl=$$(ldd $(APP_NAME) | awk '/libSDL3\.so/ {print $$3}' | head -n 1); \
 	 [ -n "$$sdl" ] || { echo "libSDL3.so not found in the link"; exit 1; }; \
 	 cp -L "$$sdl" libSDL3.so.0; \
