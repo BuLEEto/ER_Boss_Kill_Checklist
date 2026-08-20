@@ -126,6 +126,7 @@ ID_SERVER_TOGGLE  :: "obs.server"
 ID_PORT           :: "obs.port"
 ID_OVERLAY_MODE   :: "obs.overlay_mode"
 ID_OVERLAY_COUNT  :: "obs.overlay_count"
+ID_OVERLAY_REGION :: "obs.overlay_region"
 ID_OVERLAY_BG     :: "obs.overlay_bg"
 ID_SHOW_DEATHS    :: "obs.show_deaths"
 ID_TEXT_TOGGLE    :: "obs.text_enabled"
@@ -614,6 +615,18 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 			label_width = 120,
 		))
 
+		append(&rows, skald.form_row(ctx, "Region",
+			skald.select(
+				ctx, region_choice_label(app_focus_region_name()), region_choice_labels(),
+				on_overlay_region, width = 280, id = skald.hash_id(ID_OVERLAY_REGION),
+			),
+			label_width = 120,
+		))
+		append(&rows, paragraph(ctx,
+			"Auto follows the first area you haven't finished. Pin one to keep the overlay, the region text files and the ER Region sources on it instead.",
+			th.color.fg_muted, th.font.size_xs,
+		))
+
 		if app.settings.overlay_mode == "next" {
 			append(&rows, skald.form_row(ctx,
 				fmt.tprintf("Show %d bosses", app.settings.overlay_next_count),
@@ -703,6 +716,21 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		"Remember the password (encrypted, tied to this machine)",
 		on_obsws_remember, id = skald.hash_id(ID_WS_REMEMBER),
 	))
+
+	append(&rows, skald.spacer(th.spacing.xs))
+	append(&rows, skald.text("Send to OBS", th.color.fg, th.font.size_sm))
+	for kind in Obs_Source {
+		append(&rows, skald.checkbox(
+			ctx, obs_source_enabled(kind), obs_source_label(kind),
+			kind, on_obs_source_toggled,
+			id = skald.hash_id(obs_source_name(kind)),
+		))
+	}
+	append(&rows, paragraph(ctx,
+		"Unticked sources are never created in your scene. Unticking one already in OBS stops it updating but leaves it there — delete it in OBS if you don't want it.",
+		th.color.fg_muted, th.font.size_xs,
+	))
+	append(&rows, skald.spacer(th.spacing.xs))
 
 	status, state := obsws_status_text()
 	status_colour := th.color.fg_muted
@@ -817,6 +845,13 @@ overlay_url_string :: proc(allocator := context.allocator) -> string {
 	if app.settings.overlay_mode == "next" {
 		fmt.sbprintf(&b, "&count=%d", app.settings.overlay_next_count)
 	}
+	// Pin the region into the URL so the browser source keeps showing it
+	// even though the page has no access to our settings.
+	if app.settings.overlay_mode == "region" {
+		if idx := app_focus_region(); idx >= 0 && len(app_focus_region_name()) > 0 {
+			fmt.sbprintf(&b, "&region=%d", idx)
+		}
+	}
 	if app.settings.overlay_bg != "none" {
 		fmt.sbprintf(&b, "&bg=%s", app.settings.overlay_bg)
 	}
@@ -856,6 +891,20 @@ overlay_mode_index :: proc(mode: string) -> int {
 	case "region": return 2
 	case:          return 0
 	}
+}
+
+REGION_AUTO_LABEL :: "Auto — first unfinished"
+
+// Region names as the picker shows them, with Auto first.
+region_choice_labels :: proc(allocator := context.temp_allocator) -> []string {
+	out := make([dynamic]string, 0, len(app.regions) + 1, allocator)
+	append(&out, REGION_AUTO_LABEL)
+	for &r in app.regions do append(&out, r.region_name)
+	return out[:]
+}
+
+region_choice_label :: proc(name: string) -> string {
+	return len(name) > 0 ? name : REGION_AUTO_LABEL
 }
 
 overlay_bg_index :: proc(bg: string) -> int {
@@ -927,6 +976,15 @@ on_overlay_bg :: proc(i: int) -> Msg {
 }
 
 on_overlay_count :: proc(v: f32) -> Msg { return Overlay_Count_Changed(int(v + 0.5)) }
+
+on_overlay_region :: proc(label: string) -> Msg {
+	if label == REGION_AUTO_LABEL do return Overlay_Region_Selected("")
+	return Overlay_Region_Selected(label)
+}
+
+on_obs_source_toggled :: proc(kind: Obs_Source, on: bool) -> Msg {
+	return Obs_Source_Toggled{kind = kind, on = on}
+}
 
 on_obs_text_set :: proc(v: bool) -> Msg { return Obs_Text_Set(v) }
 on_obs_text_dir :: proc(v: string) -> Msg { return Obs_Text_Dir_Draft(v) }

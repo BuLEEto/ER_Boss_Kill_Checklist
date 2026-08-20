@@ -126,8 +126,12 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 				"ER Progress, ER Next Boss, ER Deaths, ER Character, ER Region and ER Region Bosses. They're created with a bold white font and a dark outline, stacked down the left, so they're readable and not piled on top of each other.",
 			},
 			Help_Step{
-				"Delete any you don't want",
-				"ER Region shows the first unfinished area and its count (\"Caelid (12/15)\"); ER Region Bosses lists what's left in it, one per line — the same breakdown the overlay's Region mode gives you.",
+				"Choose which ones you want",
+				"The Send to OBS list decides what gets created. Unticked sources are never added to your scene. ER Region shows an area and its count (\"Caelid (12/15)\"); ER Region Bosses lists what's left in it, one per line.",
+			},
+			Help_Step{
+				"Pick which area they follow",
+				"The Region setting under Browser source drives all of it. Auto follows the first area you haven't finished; pin one and the overlay, the region text files and the ER Region sources all stay on it.",
 			},
 			Help_Step{
 				"Style and place them however you like",

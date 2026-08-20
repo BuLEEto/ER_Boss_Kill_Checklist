@@ -208,8 +208,10 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 		}
 	}
 
+	// No region in the URL: fall back to whatever the app is pinned to,
+	// so a copied overlay URL and the OBS sources agree.
 	if mode == "region" && focus_region < 0 {
-		focus_region = app_first_incomplete_region()
+		focus_region = app_focus_region()
 		if focus_region < 0 do focus_region = 0
 	}
 

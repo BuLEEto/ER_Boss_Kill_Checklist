@@ -87,7 +87,7 @@ obs_text_write_all :: proc() -> os.Error {
 
 	region := "All regions cleared"
 	region_bosses := "All regions cleared"
-	if idx := app_first_incomplete_region(); idx >= 0 {
+	if idx := app_focus_region(); idx >= 0 {
 		r := &app.regions[idx]
 		r_total, r_killed := count_region_bosses(r)
 		region = fmt.tprintf("%s (%d/%d)", r.region_name, r_killed, r_total)

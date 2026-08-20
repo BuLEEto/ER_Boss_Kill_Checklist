@@ -106,6 +106,12 @@ Leave *Run the web server* on, pick your overlay mode (summary / next up /
 region) and background, then copy the URL into an OBS **Browser Source**. The
 page updates live over server-sent events — no refresh interval to tune.
 
+**Region** decides which area the Region overlay mode, `region.txt`,
+`region_bosses.txt` and the `ER Region` sources all follow. *Auto* tracks the
+first area you haven't finished; pinning one keeps everything on it, and puts
+`&region=N` in the copied URL so the browser source agrees. The pin is stored
+by name, so switching boss lists can't silently repoint it at a different area.
+
 Keep the background **Transparent** for a browser source. The green and magenta
 options exist for people capturing the page as a window instead, where a
 transparent background isn't possible and you need a chroma key.
@@ -142,6 +148,10 @@ breakdown as the overlay's Region mode.
 Restyle and position them in OBS however you like: the app only ever changes
 their text, and a source that already exists is never created, moved or
 restyled.
+
+**Send to OBS** on the same tab picks which of the six you want. Unticked ones
+are never created in your scene; unticking one that's already there stops it
+updating but leaves it for you to delete.
 
 The password is only written to `settings.json` if you tick *Remember the
 password*, and it's encrypted first — AES-256-GCM under a key derived from a

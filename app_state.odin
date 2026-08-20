@@ -214,6 +214,36 @@ app_first_incomplete_region :: proc() -> int {
 	return -1
 }
 
+// The region every integration should be showing: the pinned one if the
+// user chose it and it exists in the current boss list, otherwise the
+// first unfinished one. Returns -1 when there's nothing to show.
+//
+// The pin is matched by name, so it survives switching boss lists — and
+// falls back to auto rather than pointing somewhere arbitrary when the
+// pinned region isn't in the list at all (pin Caelid, switch to DLC
+// only).
+app_focus_region :: proc() -> int {
+	if len(app.settings.overlay_region_name) > 0 {
+		for &r, i in app.regions {
+			if r.region_name == app.settings.overlay_region_name do return i
+		}
+	}
+	return app_first_incomplete_region()
+}
+
+// The pinned region's name if it's still valid, otherwise "" for auto.
+// The GUI uses this so a stale pin shows as Auto rather than as a region
+// that isn't in the list.
+app_focus_region_name :: proc() -> string {
+	if len(app.settings.overlay_region_name) == 0 do return ""
+	for &r in app.regions {
+		if r.region_name == app.settings.overlay_region_name {
+			return app.settings.overlay_region_name
+		}
+	}
+	return ""
+}
+
 // ----------------------------------------------------------------------------
 // Settings <-> state
 // ----------------------------------------------------------------------------

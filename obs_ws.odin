@@ -34,29 +34,58 @@ import ws "src/libs/websocket"
 // handle and everything touching it takes its mutex.
 // ============================================================================
 
-// Text sources the app creates and keeps updated, in the same order as
-// the values built in obsws_push_update:
-//
-//   ER Progress       "113 / 207 bosses"
-//   ER Next Boss      the next boss still standing, with its location
-//   ER Deaths         "Deaths: 57"
-//   ER Character      character name and level
-//   ER Region         the first unfinished area and its count
-//   ER Region Bosses  what is left in that area, one per line
-//
-// Values carry their own label where a bare number would be meaningless
-// on its own — an OBS text source is a standalone thing on screen, not a
-// cell next to a heading.
+// Text sources the app can create and keep updated. Each is
+// individually switchable from the OBS tab — unchecked ones are never
+// created and never updated, because unlike a text file (which is a few
+// bytes in a folder) a source is a real object in someone's scene.
 //
 // The "ER " prefix keeps them recognisable in OBS's source list and out
-// of the way of the user's own names.
-OBS_SOURCES :: [?]string{
-	"ER Progress",
-	"ER Next Boss",
-	"ER Deaths",
-	"ER Character",
-	"ER Region",
-	"ER Region Bosses",
+// of the way of the user's own names. Values carry their own label where
+// a bare number would be meaningless alone — a text source stands by
+// itself on screen, it isn't a cell next to a heading.
+Obs_Source :: enum {
+	Progress,      // "113 / 207 bosses"
+	Next_Boss,     // the next boss standing, with its location
+	Deaths,        // "Deaths: 57"
+	Character,     // name and level
+	Region,        // the focused area and its count
+	Region_Bosses, // what's left in that area, one per line
+}
+
+obs_source_name :: proc(k: Obs_Source) -> string {
+	switch k {
+	case .Progress:      return "ER Progress"
+	case .Next_Boss:     return "ER Next Boss"
+	case .Deaths:        return "ER Deaths"
+	case .Character:     return "ER Character"
+	case .Region:        return "ER Region"
+	case .Region_Bosses: return "ER Region Bosses"
+	}
+	return ""
+}
+
+obs_source_label :: proc(k: Obs_Source) -> string {
+	switch k {
+	case .Progress:      return "Progress — \"113 / 207 bosses\""
+	case .Next_Boss:     return "Next boss — with its location"
+	case .Deaths:        return "Deaths — \"Deaths: 57\""
+	case .Character:     return "Character — name and level"
+	case .Region:        return "Region — the area and its count"
+	case .Region_Bosses: return "Region bosses — what's left there"
+	}
+	return ""
+}
+
+obs_source_enabled :: proc(k: Obs_Source) -> bool {
+	switch k {
+	case .Progress:      return app.settings.obsws_send_progress
+	case .Next_Boss:     return app.settings.obsws_send_next_boss
+	case .Deaths:        return app.settings.obsws_send_deaths
+	case .Character:     return app.settings.obsws_send_character
+	case .Region:        return app.settings.obsws_send_region
+	case .Region_Bosses: return app.settings.obsws_send_region_bosses
+	}
+	return false
 }
 
 Obsws_State :: enum {
@@ -362,16 +391,18 @@ obsws_request :: proc(conn: ^ws.Conn, request_type: string, request_data: string
 @(private = "file")
 obsws_prepare_sources :: proc(conn: ^ws.Conn) {
 	scene := obsws_current_scene(conn)
-	kind := obsws_text_kind(conn)
+	// The OBS plugin id for a text source, e.g. text_ft2_source_v2 — not
+	// to be confused with the Obs_Source kinds looped over below.
+	input_kind := obsws_text_kind(conn)
 
 	sync.mutex_lock(&g_obs.mu)
 	if len(g_obs.scene) > 0 do delete(g_obs.scene)
 	if len(g_obs.text_kind) > 0 do delete(g_obs.text_kind)
 	g_obs.scene = strings.clone(scene)
-	g_obs.text_kind = strings.clone(kind)
+	g_obs.text_kind = strings.clone(input_kind)
 	sync.mutex_unlock(&g_obs.mu)
 
-	if len(scene) == 0 || len(kind) == 0 do return
+	if len(scene) == 0 || len(input_kind) == 0 do return
 
 	// Ask what already exists before creating anything. Relying on
 	// CreateInput failing for a duplicate was enough while all we did was
@@ -386,8 +417,9 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn) {
 	y := f32(48)
 	LINE_HEIGHT :: f32(72)
 
-	sources := OBS_SOURCES
-	for name in sources {
+	for kind in Obs_Source {
+		if !obs_source_enabled(kind) do continue
+		name := obs_source_name(kind)
 		if name in existing do continue
 
 		b := strings.builder_make(context.temp_allocator)
@@ -396,9 +428,9 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn) {
 		strings.write_string(&b, `","inputName":"`)
 		json_escape_string(&b, name)
 		strings.write_string(&b, `","inputKind":"`)
-		json_escape_string(&b, kind)
+		json_escape_string(&b, input_kind)
 		strings.write_string(&b, `","inputSettings":`)
-		strings.write_string(&b, obsws_default_text_settings(kind))
+		strings.write_string(&b, obsws_default_text_settings(input_kind))
 		strings.write_string(&b, `,"sceneItemEnabled":true}`)
 		obsws_request(conn, "CreateInput", strings.to_string(b))
 
@@ -595,7 +627,7 @@ obsws_push_update :: proc() {
 
 	region_text := "All regions cleared"
 	region_bosses := "All regions cleared"
-	if idx := app_first_incomplete_region(); idx >= 0 {
+	if idx := app_focus_region(); idx >= 0 {
 		r := &app.regions[idx]
 		r_total, r_killed := count_region_bosses(r)
 		region_text = fmt.tprintf("%s (%d/%d)", r.region_name, r_killed, r_total)
@@ -609,24 +641,26 @@ obsws_push_update :: proc() {
 		region_bosses = strings.to_string(b)
 	}
 
-	values := [?]string {
-		fmt.tprintf("%d / %d bosses", killed, total),
-		next_text,
-		fmt.tprintf("Deaths: %d", app.death_count),
-		character,
-		region_text,
-		region_bosses,
-	}
+	// Built per kind so the enum stays the single source of truth for
+	// what each source shows.
+	for kind in Obs_Source {
+		if !obs_source_enabled(kind) do continue
 
-	sources := OBS_SOURCES
-	#assert(len(OBS_SOURCES) == len(values))
+		value: string
+		switch kind {
+		case .Progress:      value = fmt.tprintf("%d / %d bosses", killed, total)
+		case .Next_Boss:     value = next_text
+		case .Deaths:        value = fmt.tprintf("Deaths: %d", app.death_count)
+		case .Character:     value = character
+		case .Region:        value = region_text
+		case .Region_Bosses: value = region_bosses
+		}
 
-	for name, i in sources {
 		b := strings.builder_make(context.temp_allocator)
 		strings.write_string(&b, `{"inputName":"`)
-		json_escape_string(&b, name)
+		json_escape_string(&b, obs_source_name(kind))
 		strings.write_string(&b, `","inputSettings":{"text":"`)
-		json_escape_string(&b, values[i])
+		json_escape_string(&b, value)
 		strings.write_string(&b, `"},"overlay":true}`)
 		obsws_request(conn, "SetInputSettings", strings.to_string(b))
 	}

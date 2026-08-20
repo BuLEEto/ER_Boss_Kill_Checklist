@@ -47,7 +47,8 @@ POLL_SECONDS_DEFAULT :: 5
 //   1  first version written to the config directory
 //   2  "elden" replaced "dark" as the default theme
 //   3  obsws password encrypted at rest, under a new key name
-SETTINGS_VERSION :: 3
+//   4  region pinned by name rather than index; per-source obsws toggles
+SETTINGS_VERSION :: 4
 
 Settings :: struct {
 	version: int `json:"version"`,
@@ -66,8 +67,17 @@ Settings :: struct {
 	// Overlay defaults, mirrored into the URL the OBS tab hands out
 	overlay_mode:       string `json:"overlay_mode"`,       // summary | next | region
 	overlay_next_count: int    `json:"overlay_next_count"`,
-	overlay_region:     int    `json:"overlay_region"`,
 	overlay_bg:         string `json:"overlay_bg"`,         // none | green | magenta
+
+	// Which region the Region overlay mode, ER Region and region.txt all
+	// follow. Empty means "whichever is unfinished first". Stored by name
+	// rather than index because the index only means anything within one
+	// boss list — switching from All bosses to DLC only would otherwise
+	// silently repoint it at a different area.
+	//
+	// (v3 and earlier wrote an unused "overlay_region" integer here. The
+	// decoder ignores the leftover key.)
+	overlay_region_name: string `json:"overlay_region_name"`,
 
 	// OBS text-file output, for "Text (GDI+/FreeType)" sources set to
 	// read from file
@@ -79,6 +89,16 @@ Settings :: struct {
 	obsws_host:              string `json:"obsws_host"`,
 	obsws_port:              int    `json:"obsws_port"`,
 	obsws_remember_password: bool   `json:"obsws_remember_password"`,
+
+	// Which of the six text sources the app creates and updates in OBS.
+	// Named individually rather than packed into a bitmask so the file
+	// stays legible — this is a config someone might open and edit.
+	obsws_send_progress:      bool `json:"obsws_send_progress"`,
+	obsws_send_next_boss:     bool `json:"obsws_send_next_boss"`,
+	obsws_send_deaths:        bool `json:"obsws_send_deaths"`,
+	obsws_send_character:     bool `json:"obsws_send_character"`,
+	obsws_send_region:        bool `json:"obsws_send_region"`,
+	obsws_send_region_bosses: bool `json:"obsws_send_region_bosses"`,
 	// Encrypted at rest — see obsws_password_enc below and
 	// src/libs/sbcrypto. Held in memory decrypted.
 	obsws_password:          string `json:"obsws_password_enc"`,
@@ -106,16 +126,23 @@ default_settings :: proc() -> Settings {
 		server_enabled = true,
 		server_port    = 3000,
 
-		overlay_mode       = "summary",
-		overlay_next_count = 8,
-		overlay_region     = -1,
-		overlay_bg         = "none",
+		overlay_mode        = "summary",
+		overlay_next_count  = 8,
+		overlay_bg          = "none",
+		overlay_region_name = "", // auto
 
 		obs_text_enabled = false,
 
 		obsws_enabled = false,
 		obsws_host    = "127.0.0.1",
 		obsws_port    = 4455,
+
+		obsws_send_progress      = true,
+		obsws_send_next_boss     = true,
+		obsws_send_deaths        = true,
+		obsws_send_character     = true,
+		obsws_send_region        = true,
+		obsws_send_region_bosses = true,
 
 		theme    = "elden",
 		ui_scale = 1.15, // Skald's stock 14px body text is small on a big display
@@ -224,6 +251,7 @@ load_settings_file :: proc(allocator := context.allocator) -> (s: Settings, err:
 	s.boss_list      = strings.clone(decoded.boss_list, allocator)
 	s.overlay_mode   = strings.clone(decoded.overlay_mode, allocator)
 	s.overlay_bg     = strings.clone(decoded.overlay_bg, allocator)
+	s.overlay_region_name = strings.clone(decoded.overlay_region_name, allocator)
 	s.obs_text_dir   = strings.clone(decoded.obs_text_dir, allocator)
 	s.obsws_host     = strings.clone(decoded.obsws_host, allocator)
 

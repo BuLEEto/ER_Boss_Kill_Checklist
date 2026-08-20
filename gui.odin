@@ -120,6 +120,11 @@ Port_Committed :: struct {}
 Overlay_Mode_Selected :: distinct string
 Overlay_Bg_Selected :: distinct string
 Overlay_Count_Changed :: distinct int
+Overlay_Region_Selected :: distinct string
+Obs_Source_Toggled :: struct {
+	kind: Obs_Source,
+	on:   bool,
+}
 Copy_Requested :: distinct string
 
 Obs_Text_Set :: distinct bool
@@ -172,6 +177,8 @@ Msg :: union {
 	Overlay_Mode_Selected,
 	Overlay_Bg_Selected,
 	Overlay_Count_Changed,
+	Overlay_Region_Selected,
+	Obs_Source_Toggled,
 	Copy_Requested,
 	Obs_Text_Set,
 	Obs_Text_Dir_Draft,
@@ -426,6 +433,34 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		sync.guard(&app.mu)
 		app.settings.overlay_next_count = clamp(int(v), 1, 50)
 		app_save_settings()
+
+	case Overlay_Region_Selected:
+		sync.guard(&app.mu)
+		delete(app.settings.overlay_region_name)
+		app.settings.overlay_region_name = strings.clone(string(v))
+		app_save_settings()
+		// The region feeds the overlay, the text files and two OBS
+		// sources, so push the change everywhere rather than waiting for
+		// the next boss to die.
+		out = gui_after_data_change(out)
+
+	case Obs_Source_Toggled:
+		sync.guard(&app.mu)
+		switch v.kind {
+		case .Progress:      app.settings.obsws_send_progress = v.on
+		case .Next_Boss:     app.settings.obsws_send_next_boss = v.on
+		case .Deaths:        app.settings.obsws_send_deaths = v.on
+		case .Character:     app.settings.obsws_send_character = v.on
+		case .Region:        app.settings.obsws_send_region = v.on
+		case .Region_Bosses: app.settings.obsws_send_region_bosses = v.on
+		}
+		app_save_settings()
+		// Newly-ticked sources don't exist in OBS yet, so re-run the
+		// setup rather than only pushing text at them.
+		if app.settings.obsws_enabled && v.on {
+			return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
+		}
+		obsws_push_update()
 
 	case Copy_Requested:
 		skald.clipboard_set(string(v))
