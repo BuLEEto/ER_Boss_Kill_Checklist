@@ -618,15 +618,12 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 
 		append(&rows, skald.form_row(ctx, "Region",
 			skald.select(
-				ctx, region_choice_label(app_focus_region_name()), region_choice_labels(),
+				ctx, region_choice_label(), region_choice_labels(),
 				on_overlay_region, width = 280, id = skald.hash_id(ID_OVERLAY_REGION),
 			),
 			label_width = 120,
 		))
-		append(&rows, paragraph(ctx,
-			"Auto follows the first area you haven't finished. Pin one to keep the overlay, the region text files and the ER Region sources on it instead.",
-			th.color.fg_muted, th.font.size_xs,
-		))
+		append(&rows, paragraph(ctx, region_choice_hint(), th.color.fg_muted, th.font.size_xs))
 
 		if app.settings.overlay_mode == "next" {
 			append(&rows, skald.form_row(ctx,
@@ -854,10 +851,14 @@ overlay_url_string :: proc(allocator := context.allocator) -> string {
 	if app.settings.overlay_mode == "next" {
 		fmt.sbprintf(&b, "&count=%d", app.settings.overlay_next_count)
 	}
-	// Pin the region into the URL so the browser source keeps showing it
-	// even though the page has no access to our settings.
-	if app.settings.overlay_mode == "region" {
-		if idx := app_focus_region(); idx >= 0 && len(app_focus_region_name()) > 0 {
+	// A pinned region goes into the URL so the browser source shows the
+	// same area even though the page can't see our settings. The
+	// automatic modes deliberately don't: leaving the parameter off makes
+	// the server resolve it on every request, so the page keeps following
+	// along instead of freezing on whichever area was current when the
+	// URL was copied.
+	if app.settings.overlay_mode == "region" && len(app_focus_region_name()) > 0 {
+		if idx := app_focus_region(); idx >= 0 {
 			fmt.sbprintf(&b, "&region=%d", idx)
 		}
 	}
@@ -902,18 +903,44 @@ overlay_mode_index :: proc(mode: string) -> int {
 	}
 }
 
-REGION_AUTO_LABEL :: "Auto — first unfinished"
+REGION_FIRST_LABEL :: "Auto — first unfinished"
+REGION_LAST_KILL_LABEL :: "Auto — where I last killed"
 
-// Region names as the picker shows them, with Auto first.
+// Region names as the picker shows them, both automatic modes first.
 region_choice_labels :: proc(allocator := context.temp_allocator) -> []string {
-	out := make([dynamic]string, 0, len(app.regions) + 1, allocator)
-	append(&out, REGION_AUTO_LABEL)
+	out := make([dynamic]string, 0, len(app.regions) + 2, allocator)
+	append(&out, REGION_FIRST_LABEL, REGION_LAST_KILL_LABEL)
 	for &r in app.regions do append(&out, r.region_name)
 	return out[:]
 }
 
-region_choice_label :: proc(name: string) -> string {
-	return len(name) > 0 ? name : REGION_AUTO_LABEL
+region_choice_label :: proc() -> string {
+	switch app.settings.overlay_region_mode {
+	case "last_kill":
+		return REGION_LAST_KILL_LABEL
+	case "pinned":
+		if name := app_focus_region_name(); len(name) > 0 do return name
+	}
+	return REGION_FIRST_LABEL
+}
+
+// What the picker's explanatory line says, which depends on the mode —
+// last-kill in particular deserves saying out loud that it only knows
+// about kills the app was running for.
+region_choice_hint :: proc() -> string {
+	switch app.settings.overlay_region_mode {
+	case "last_kill":
+		if len(app.settings.last_kill_region) > 0 {
+			return fmt.tprintf(
+				"Following %s, where the last kill happened. Moves on its own as you play; falls back to the first unfinished area until the next kill once that one is cleared.",
+				app.settings.last_kill_region,
+			)
+		}
+		return "Follows whichever area you most recently killed something in. The save records that a boss is dead, never when — so this only counts kills the app was open for. Until then it shows the first unfinished area."
+	case "pinned":
+		return "Pinned. The overlay, the region text files and the ER Region sources all stay on this area until you change it."
+	}
+	return "Follows the first area you haven't finished, in list order. Pick \"where I last killed\" to have it track you instead, or pin an area."
 }
 
 overlay_bg_index :: proc(bg: string) -> int {
@@ -987,7 +1014,11 @@ on_overlay_bg :: proc(i: int) -> Msg {
 on_overlay_count :: proc(v: f32) -> Msg { return Overlay_Count_Changed(int(v + 0.5)) }
 
 on_overlay_region :: proc(label: string) -> Msg {
-	if label == REGION_AUTO_LABEL do return Overlay_Region_Selected("")
+	switch label {
+	case REGION_FIRST_LABEL:     return Overlay_Region_Selected("first")
+	case REGION_LAST_KILL_LABEL: return Overlay_Region_Selected("last_kill")
+	}
+	// Anything else is a region name, so it's a pin.
 	return Overlay_Region_Selected(label)
 }
 

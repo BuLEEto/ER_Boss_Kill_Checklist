@@ -214,34 +214,54 @@ app_first_incomplete_region :: proc() -> int {
 	return -1
 }
 
-// The region every integration should be showing: the pinned one if the
-// user chose it and it exists in the current boss list, otherwise the
-// first unfinished one. Returns -1 when there's nothing to show.
+// The region every integration should be showing, or -1 when there's
+// nothing to show. See Settings.overlay_region_mode for the three modes.
 //
-// The pin is matched by name, so it survives switching boss lists — and
-// falls back to auto rather than pointing somewhere arbitrary when the
-// pinned region isn't in the list at all (pin Caelid, switch to DLC
-// only).
+// Both automatic modes fall through to "first unfinished" when they can't
+// answer: last_kill before the app has witnessed a kill, and pinned when
+// the pinned area isn't in the current boss list at all (pin Caelid,
+// switch to DLC only). Better a sensible area than none.
 app_focus_region :: proc() -> int {
-	if len(app.settings.overlay_region_name) > 0 {
-		for &r, i in app.regions {
-			if r.region_name == app.settings.overlay_region_name do return i
+	switch app.settings.overlay_region_mode {
+	case "pinned":
+		if i := app_region_index(app.settings.overlay_region_name); i >= 0 do return i
+
+	case "last_kill":
+		if i := app_region_index(app.settings.last_kill_region); i >= 0 {
+			// Once that area is finished it stops being useful to sit on
+			// — an overlay showing a cleared region with nothing left in
+			// it is dead weight until the next kill moves it along.
+			total, killed := count_region_bosses(&app.regions[i])
+			if killed < total do return i
 		}
 	}
 	return app_first_incomplete_region()
 }
 
-// The pinned region's name if it's still valid, otherwise "" for auto.
-// The GUI uses this so a stale pin shows as Auto rather than as a region
-// that isn't in the list.
-app_focus_region_name :: proc() -> string {
-	if len(app.settings.overlay_region_name) == 0 do return ""
-	for &r in app.regions {
-		if r.region_name == app.settings.overlay_region_name {
-			return app.settings.overlay_region_name
-		}
+app_region_index :: proc(name: string) -> int {
+	if len(name) == 0 do return -1
+	for &r, i in app.regions {
+		if r.region_name == name do return i
 	}
-	return ""
+	return -1
+}
+
+// The pinned region's name if it's still valid, otherwise "". The GUI
+// uses this so a stale pin shows as auto rather than as a region that
+// isn't in the list.
+app_focus_region_name :: proc() -> string {
+	if app.settings.overlay_region_mode != "pinned" do return ""
+	if app_region_index(app.settings.overlay_region_name) < 0 do return ""
+	return app.settings.overlay_region_name
+}
+
+// Record where a kill just happened. Returns true when this is new
+// information worth persisting.
+app_note_kill_region :: proc(name: string) -> bool {
+	if len(name) == 0 || name == app.settings.last_kill_region do return false
+	delete(app.settings.last_kill_region)
+	app.settings.last_kill_region = strings.clone(name)
+	return true
 }
 
 // ----------------------------------------------------------------------------

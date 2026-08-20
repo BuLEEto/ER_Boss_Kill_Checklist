@@ -438,8 +438,15 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 
 	case Overlay_Region_Selected:
 		sync.guard(&app.mu)
-		delete(app.settings.overlay_region_name)
-		app.settings.overlay_region_name = strings.clone(string(v))
+		choice := string(v)
+		delete(app.settings.overlay_region_mode)
+		if choice == "first" || choice == "last_kill" {
+			app.settings.overlay_region_mode = strings.clone(choice)
+		} else {
+			app.settings.overlay_region_mode = strings.clone("pinned")
+			delete(app.settings.overlay_region_name)
+			app.settings.overlay_region_name = strings.clone(choice)
+		}
 		app_save_settings()
 		// The region feeds the overlay, the text files and two OBS
 		// sources, so push the change everywhere rather than waiting for
@@ -808,14 +815,34 @@ apply_poll_result :: proc(s: Gui, r: Poll_Done) -> Gui {
 
 	changed := app.death_count != old_deaths
 	newly_killed := 0
+
+	// Which area saw the most new kills this poll. Usually one boss in
+	// one area, but a save that changed while the app was closed can
+	// bring in several at once — the busiest area is the better guess at
+	// where the player actually is.
+	best_region := ""
+	best_count := 0
+
 	for &reg in app.regions {
+		region_kills := 0
 		for &b in reg.bosses {
 			was, seen := old_killed[b.flag_id]
 			if seen && was != b.killed {
 				changed = true
-				if b.killed do newly_killed += 1
+				if b.killed {
+					newly_killed += 1
+					region_kills += 1
+				}
 			}
 		}
+		if region_kills > best_count {
+			best_count = region_kills
+			best_region = reg.region_name
+		}
+	}
+
+	if best_count > 0 && app_note_kill_region(best_region) {
+		app_save_settings()
 	}
 
 	if !changed do return out

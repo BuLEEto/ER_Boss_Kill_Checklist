@@ -107,10 +107,19 @@ region) and background, then copy the URL into an OBS **Browser Source**. The
 page updates live over server-sent events — no refresh interval to tune.
 
 **Region** decides which area the Region overlay mode, `region.txt`,
-`region_bosses.txt` and the `ER Region` sources all follow. *Auto* tracks the
-first area you haven't finished; pinning one keeps everything on it, and puts
-`&region=N` in the copied URL so the browser source agrees. The pin is stored
-by name, so switching boss lists can't silently repoint it at a different area.
+`region_bosses.txt` and the `ER Region` sources all follow:
+
+| | |
+|---|---|
+| *Auto — where I last killed* | Tracks the area your most recent kill happened in, so it follows you around. The save records only *that* a boss is dead, never when — so this counts kills the app was open for. Falls back to first-unfinished until it's seen one, and again once that area is cleared. |
+| *Auto — first unfinished* | The first area with anything left, in list order. |
+| A region by name | Pinned. Everything stays there until you change it. |
+
+A pin puts `&region=N` in the copied URL so the browser source agrees. The
+automatic modes deliberately leave it off — the server then resolves the area
+on every request, so the page keeps following instead of freezing on whichever
+area was current when you copied the URL. The pin is stored by name, so
+switching boss lists can't silently repoint it at a different area.
 
 Keep the background **Transparent** for a browser source. The green and magenta
 options exist for people capturing the page as a window instead, where a

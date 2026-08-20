@@ -135,7 +135,7 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 			Help_Step{
 				"Pick which area they follow",
-				"The Region setting under Browser source drives all of it. Auto follows the first area you haven't finished; pin one and the overlay, the region text files and the ER Region sources all stay on it.",
+				"The Region setting under Browser source drives all of it. \"Where I last killed\" tracks you as you play; \"first unfinished\" walks the list in order; or pin an area and everything stays on it.",
 			},
 			Help_Step{
 				"Style and place them however you like",

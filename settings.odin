@@ -48,7 +48,8 @@ POLL_SECONDS_DEFAULT :: 5
 //   2  "elden" replaced "dark" as the default theme
 //   3  obsws password encrypted at rest, under a new key name
 //   4  region pinned by name rather than index; per-source obsws toggles
-SETTINGS_VERSION :: 4
+//   5  region selection grew a mode, so "pinned" is distinct from "auto"
+SETTINGS_VERSION :: 5
 
 Settings :: struct {
 	version: int `json:"version"`,
@@ -70,14 +71,26 @@ Settings :: struct {
 	overlay_bg:         string `json:"overlay_bg"`,         // none | green | magenta
 
 	// Which region the Region overlay mode, ER Region and region.txt all
-	// follow. Empty means "whichever is unfinished first". Stored by name
-	// rather than index because the index only means anything within one
-	// boss list — switching from All bosses to DLC only would otherwise
-	// silently repoint it at a different area.
+	// follow:
+	//
+	//   "first"      the first area with anything left, in list order
+	//   "last_kill"  the area the most recent kill happened in
+	//   "pinned"     overlay_region_name, chosen by the user
+	//
+	// The pin is stored by name rather than index because an index only
+	// means anything within one boss list — switching from All bosses to
+	// DLC only would otherwise silently repoint it at a different area.
 	//
 	// (v3 and earlier wrote an unused "overlay_region" integer here. The
 	// decoder ignores the leftover key.)
+	overlay_region_mode: string `json:"overlay_region_mode"`,
 	overlay_region_name: string `json:"overlay_region_name"`,
+
+	// The area the last kill we actually witnessed happened in. Written
+	// by the poller, persisted so "where I last killed" survives a
+	// restart — the save file records that a boss is dead, never when or
+	// in what order, so this is the only way to know.
+	last_kill_region: string `json:"last_kill_region"`,
 
 	// OBS text-file output, for "Text (GDI+/FreeType)" sources set to
 	// read from file
@@ -135,7 +148,9 @@ default_settings :: proc() -> Settings {
 		overlay_mode        = "summary",
 		overlay_next_count  = 8,
 		overlay_bg          = "none",
-		overlay_region_name = "", // auto
+		overlay_region_mode = "first",
+		overlay_region_name = "",
+		last_kill_region    = "",
 
 		obs_text_enabled = false,
 
@@ -259,7 +274,9 @@ load_settings_file :: proc(allocator := context.allocator) -> (s: Settings, err:
 	s.boss_list      = strings.clone(decoded.boss_list, allocator)
 	s.overlay_mode   = strings.clone(decoded.overlay_mode, allocator)
 	s.overlay_bg     = strings.clone(decoded.overlay_bg, allocator)
+	s.overlay_region_mode = strings.clone(decoded.overlay_region_mode, allocator)
 	s.overlay_region_name = strings.clone(decoded.overlay_region_name, allocator)
+	s.last_kill_region    = strings.clone(decoded.last_kill_region, allocator)
 	s.obs_text_dir   = strings.clone(decoded.obs_text_dir, allocator)
 	s.obsws_host     = strings.clone(decoded.obsws_host, allocator)
 
@@ -287,6 +304,12 @@ migrate_settings :: proc(s: ^Settings) {
 	// follow-system asked for it and is left alone.
 	if s.version < 2 && s.theme == "dark" {
 		s.theme = "elden"
+	}
+
+	// v4 had no mode: a non-empty region name was the only way to say
+	// "pinned", so that's what one means.
+	if s.version < 5 && len(s.overlay_region_mode) == 0 {
+		s.overlay_region_mode = len(s.overlay_region_name) > 0 ? "pinned" : "first"
 	}
 	s.version = SETTINGS_VERSION
 }
@@ -354,6 +377,15 @@ settings_apply_bounds :: proc(s: ^Settings) {
 	// decoder leaves the default in place — this only catches a hand-edit
 	// that put it out of range.
 	if s.ui_scale < UI_SCALE_MIN || s.ui_scale > UI_SCALE_MAX do s.ui_scale = 1.15
+
+	switch s.overlay_region_mode {
+	case "first", "last_kill", "pinned": // fine
+	case:                                s.overlay_region_mode = "first"
+	}
+	// A pin with nothing pinned is just auto.
+	if s.overlay_region_mode == "pinned" && len(s.overlay_region_name) == 0 {
+		s.overlay_region_mode = "first"
+	}
 }
 
 // ----------------------------------------------------------------------------
