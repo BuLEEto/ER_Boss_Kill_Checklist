@@ -78,6 +78,14 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 				"Position it",
 				"Drag it where you want. It refreshes itself whenever a boss dies — you don't need to tick \"Refresh browser when scene becomes active\".",
 			},
+			Help_Step{
+				"Recolour it, if you like",
+				"Properties → Custom CSS. The page's colours are CSS variables, so one rule repaints the lot:\n\n:root { --gold: #ff4444; --text: #ffffff; }\n\nVariables are --gold, --gold-dim, --text, --text-dim, --red and --green. The app never writes to that box, so whatever you put there survives.",
+			},
+			Help_Step{
+				"Why this and not a text source",
+				"OBS text sources have no alignment and no line height, so a multi-line list is stuck left-aligned with whatever spacing the font gives. This is a web page, so Align actually aligns every line, and the styling is yours to change.",
+			},
 		)
 
 	case .Text_Files:
@@ -132,6 +140,10 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			Help_Step{
 				"Choose which ones you want",
 				"The Send to OBS list decides what gets created. Unticked sources are never added to your scene. ER Region shows an area and its count (\"Caelid (12/15)\"); ER Region Bosses lists what's left in it, one per line.",
+			},
+			Help_Step{
+				"Want it properly laid out? Tick ER Overlay",
+				"That one isn't a text source — it's a browser source pointed at the overlay page, created and kept in step for you. Text sources can't align or space multi-line lists at all; the overlay page can, because it's HTML. Recolour it with Custom CSS in its properties.",
 			},
 			Help_Step{
 				"Pick which area they follow",

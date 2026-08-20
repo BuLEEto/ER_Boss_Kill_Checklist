@@ -14,6 +14,12 @@
         document.body.classList.add('bg-' + bg);
     }
 
+    // Text alignment. OBS text sources can't align multi-line text at all,
+    // so this is the reason to prefer a browser source for lists.
+    if (params.get('align') === 'right') {
+        document.body.classList.add('align-right');
+    }
+
     // Auto-refresh fallback for OBS Window Capture / old OBS without browser source
     var refreshSec = parseInt(params.get('refresh') || '0', 10);
     if (refreshSec > 0) {

@@ -22,6 +22,22 @@ body {
 body.bg-green { background: #00ff00; }
 body.bg-magenta { background: #ff00ff; }
 
+/* Right-aligned layout.
+ *
+ * This is the thing OBS's own text sources can't do: a Text (FreeType 2)
+ * source has no alignment at all, and a scene item's bounding box only
+ * positions the whole block, so multi-line lists stay ragged. Here it's
+ * one CSS rule.
+ *
+ * The overlay card also hugs the right edge of the browser source, so the
+ * source can be parked against the right of the canvas and the text grows
+ * leftwards instead of pushing out of frame. */
+body.align-right { text-align: right; }
+body.align-right .overlay { margin-left: auto; }
+body.align-right .header-row,
+body.align-right .summary-row { flex-direction: row-reverse; }
+body.align-right .boss-item { padding: 4px 8px 4px 0; }
+
 .overlay {
     width: 320px;
     padding: 10px 12px;

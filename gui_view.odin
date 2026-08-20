@@ -128,6 +128,7 @@ ID_OVERLAY_MODE   :: "obs.overlay_mode"
 ID_OVERLAY_COUNT  :: "obs.overlay_count"
 ID_OVERLAY_REGION :: "obs.overlay_region"
 ID_ROOMY_LINES    :: "obs.roomy_lines"
+ID_OVERLAY_ALIGN  :: "obs.overlay_align"
 ID_OVERLAY_BG     :: "obs.overlay_bg"
 ID_SHOW_DEATHS    :: "obs.show_deaths"
 ID_TEXT_TOGGLE    :: "obs.text_enabled"
@@ -637,6 +638,19 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 			))
 		}
 
+		append(&rows, skald.form_row(ctx, "Align",
+			skald.segmented(
+				ctx, {"Left", "Right"},
+				app.settings.overlay_align == "right" ? 1 : 0, on_overlay_align,
+				id = skald.hash_id(ID_OVERLAY_ALIGN),
+			),
+			label_width = 120,
+		))
+		append(&rows, paragraph(ctx,
+			"Right-aligns every line, which OBS's own text sources can't do at all — park the source against the right of your canvas and lists grow leftwards instead of out of frame.",
+			th.color.fg_muted, th.font.size_xs,
+		))
+
 		append(&rows, skald.form_row(ctx, "Background",
 			skald.segmented(
 				ctx, {"Transparent", "Green", "Magenta"},
@@ -865,6 +879,9 @@ overlay_url_string :: proc(allocator := context.allocator) -> string {
 	if app.settings.overlay_bg != "none" {
 		fmt.sbprintf(&b, "&bg=%s", app.settings.overlay_bg)
 	}
+	if app.settings.overlay_align == "right" {
+		strings.write_string(&b, "&align=right")
+	}
 	if app.settings.show_deaths {
 		strings.write_string(&b, "&deaths=true")
 	}
@@ -1012,6 +1029,10 @@ on_overlay_bg :: proc(i: int) -> Msg {
 }
 
 on_overlay_count :: proc(v: f32) -> Msg { return Overlay_Count_Changed(int(v + 0.5)) }
+
+on_overlay_align :: proc(i: int) -> Msg {
+	return Overlay_Align_Selected(i == 1 ? "right" : "left")
+}
 
 on_overlay_region :: proc(label: string) -> Msg {
 	switch label {

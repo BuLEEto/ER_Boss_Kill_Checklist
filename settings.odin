@@ -69,6 +69,7 @@ Settings :: struct {
 	overlay_mode:       string `json:"overlay_mode"`,       // summary | next | region
 	overlay_next_count: int    `json:"overlay_next_count"`,
 	overlay_bg:         string `json:"overlay_bg"`,         // none | green | magenta
+	overlay_align:      string `json:"overlay_align"`,      // left | right
 
 	// Which region the Region overlay mode, ER Region and region.txt all
 	// follow:
@@ -113,6 +114,11 @@ Settings :: struct {
 	obsws_send_region:        bool `json:"obsws_send_region"`,
 	obsws_send_region_bosses: bool `json:"obsws_send_region_bosses"`,
 
+	// The overlay page itself, as a browser source. Off by default: it
+	// overlaps what the text sources show, so having both appear
+	// uninvited would be a mess.
+	obsws_send_overlay: bool `json:"obsws_send_overlay"`,
+
 	// Blank line between entries in the multi-line outputs. OBS text
 	// sources have no line-height setting — it's been a feature request
 	// for years — so the only way to loosen them up is to send the extra
@@ -148,6 +154,7 @@ default_settings :: proc() -> Settings {
 		overlay_mode        = "summary",
 		overlay_next_count  = 8,
 		overlay_bg          = "none",
+		overlay_align       = "left",
 		overlay_region_mode = "first",
 		overlay_region_name = "",
 		last_kill_region    = "",
@@ -164,6 +171,7 @@ default_settings :: proc() -> Settings {
 		obsws_send_character     = true,
 		obsws_send_region        = true,
 		obsws_send_region_bosses = true,
+		obsws_send_overlay       = false,
 
 		obs_roomy_lines = true,
 
@@ -318,6 +326,7 @@ settings_own_strings :: proc(s: ^Settings, allocator := context.allocator) {
 		&s.boss_list,
 		&s.overlay_mode,
 		&s.overlay_bg,
+		&s.overlay_align,
 		&s.overlay_region_mode,
 		&s.overlay_region_name,
 		&s.last_kill_region,
@@ -415,6 +424,10 @@ settings_apply_bounds :: proc(s: ^Settings) {
 	switch s.overlay_bg {
 	case "none", "green", "magenta": // fine
 	case:                            s.overlay_bg = "none"
+	}
+	switch s.overlay_align {
+	case "left", "right": // fine
+	case:                 s.overlay_align = "left"
 	}
 	switch s.theme {
 	case "elden", "dark", "light", "system": // fine

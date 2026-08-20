@@ -121,7 +121,27 @@ on every request, so the page keeps following instead of freezing on whichever
 area was current when you copied the URL. The pin is stored by name, so
 switching boss lists can't silently repoint it at a different area.
 
-Keep the background **Transparent** for a browser source. The green and magenta
+**Align** switches the whole overlay between left and right. Worth knowing why
+it lives here and not on the text sources: OBS's own text sources have no text
+alignment and no line-height control, so a multi-line list is stuck left-aligned
+whatever you do with the scene item's bounding box — that only moves the block,
+not the lines inside it. The overlay is a web page, so alignment is one CSS
+rule.
+
+Keep the background **Transparent** for a browser source.
+
+### Recolouring the overlay
+
+The page's colours are CSS custom properties, so OBS's **Custom CSS** box (in
+the browser source's properties) repaints the whole thing:
+
+```css
+:root { --gold: #ff4444; --text: #ffffff; }
+```
+
+The variables are `--gold`, `--gold-dim`, `--text`, `--text-dim`, `--red` and
+`--green`. The app never writes to that box, and never resends the source's
+width or height after creating it, so your styling and sizing survive. The green and magenta
 options exist for people capturing the page as a window instead, where a
 transparent background isn't possible and you need a chroma key.
 
@@ -158,7 +178,12 @@ Restyle and position them in OBS however you like: the app only ever changes
 their text, and a source that already exists is never created, moved or
 restyled.
 
-**Send to OBS** on the same tab picks which of the six you want. Unticking one
+**ER Overlay** in that list is the odd one out: not a text source but a browser
+source pointed at the overlay page, created and kept in step for you. It's the
+way to get a properly aligned, properly spaced list into OBS, since text sources
+can't do either. Off by default, because it overlaps what the text sources show.
+
+**Send to OBS** on the same tab picks which of the seven you want. Unticking one
 *hides* it in OBS rather than deleting it — anything you've styled or positioned
 survives, and re-ticking brings it straight back. OBS has no undo for a deleted
 source, so hiding is the safer default; delete it yourself if you want it gone.

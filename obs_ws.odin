@@ -50,6 +50,13 @@ Obs_Source :: enum {
 	Character,     // name and level
 	Region,        // the focused area and its count
 	Region_Bosses, // what's left in that area, one per line
+
+	// Not a text source: a browser source pointed at the overlay page
+	// this app already serves. It's the only way to get real typography
+	// in OBS — text sources have no alignment, no line height, and no
+	// per-line control — so anything that wants a properly laid-out list
+	// goes through here.
+	Overlay,
 }
 
 obs_source_name :: proc(k: Obs_Source) -> string {
@@ -60,6 +67,7 @@ obs_source_name :: proc(k: Obs_Source) -> string {
 	case .Character:     return "ER Character"
 	case .Region:        return "ER Region"
 	case .Region_Bosses: return "ER Region Bosses"
+	case .Overlay:       return "ER Overlay"
 	}
 	return ""
 }
@@ -72,6 +80,7 @@ obs_source_label :: proc(k: Obs_Source) -> string {
 	case .Character:     return "Character — name and level"
 	case .Region:        return "Region — the area and its count"
 	case .Region_Bosses: return "Region bosses — what's left there"
+	case .Overlay:       return "Overlay page — the styled browser source"
 	}
 	return ""
 }
@@ -84,6 +93,7 @@ obs_source_enabled :: proc(k: Obs_Source) -> bool {
 	case .Character:     return app.settings.obsws_send_character
 	case .Region:        return app.settings.obsws_send_region
 	case .Region_Bosses: return app.settings.obsws_send_region_bosses
+	case .Overlay:       return app.settings.obsws_send_overlay
 	}
 	return false
 }
@@ -436,21 +446,58 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn) {
 			continue
 		}
 
+		kind_id := kind == .Overlay ? "browser_source" : input_kind
+		settings := kind == .Overlay \
+			? obsws_browser_settings(with_size = true) \
+			: obsws_default_text_settings(input_kind)
+
 		b := strings.builder_make(context.temp_allocator)
 		strings.write_string(&b, `{"sceneName":"`)
 		json_escape_string(&b, scene)
 		strings.write_string(&b, `","inputName":"`)
 		json_escape_string(&b, name)
 		strings.write_string(&b, `","inputKind":"`)
-		json_escape_string(&b, input_kind)
+		json_escape_string(&b, kind_id)
 		strings.write_string(&b, `","inputSettings":`)
-		strings.write_string(&b, obsws_default_text_settings(input_kind))
+		strings.write_string(&b, settings)
 		strings.write_string(&b, `,"sceneItemEnabled":true}`)
 		obsws_request(conn, "CreateInput", strings.to_string(b))
 
 		obsws_place_source(conn, scene, name, 48, y)
 		y += LINE_HEIGHT
 	}
+}
+
+// A browser source pointed at our own overlay page.
+//
+// This is what makes real typography possible in OBS: the page is HTML
+// we serve and style, so alignment, line height and layout are CSS
+// rather than whatever the text plugin happens to support. The page
+// refreshes itself over SSE, so OBS never has to poll it.
+//
+// `with_size` is only true at creation. SetInputSettings merges the keys
+// it's given over the existing ones, so resending width and height on
+// every update would undo a resize the user had made in OBS. The URL is
+// the one field we do have to maintain, because it carries the overlay
+// mode, region and alignment.
+//
+// Note what is deliberately never sent: "css". That's OBS's Custom CSS
+// box, and it belongs to the user — it's how they restyle the overlay.
+// The page's colours are CSS variables on :root precisely so a couple of
+// lines in that box can repaint the whole thing.
+@(private = "file")
+obsws_browser_settings :: proc(with_size := false) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, `{"url":"`)
+	json_escape_string(&b, overlay_url_string(context.temp_allocator))
+	strings.write_string(&b, `"`)
+	if with_size {
+		// Generous enough for the longest list; the card inside is only
+		// as big as its content, and the rest of the page is transparent.
+		strings.write_string(&b, `,"width":520,"height":900,"reroute_audio":false`)
+	}
+	strings.write_string(&b, `}`)
+	return strings.to_string(b)
 }
 
 // Settings a freshly-created text source starts with, so it's legible
@@ -683,6 +730,20 @@ obsws_push_update :: proc() {
 	for kind in Obs_Source {
 		if !obs_source_enabled(kind) do continue
 
+		// The browser source updates itself over SSE, so all it needs is
+		// its URL kept in step with the overlay settings — mode, region,
+		// alignment. Sent as inputSettings like everything else.
+		if kind == .Overlay {
+			b := strings.builder_make(context.temp_allocator)
+			strings.write_string(&b, `{"inputName":"`)
+			json_escape_string(&b, obs_source_name(kind))
+			strings.write_string(&b, `","inputSettings":`)
+			strings.write_string(&b, obsws_browser_settings())
+			strings.write_string(&b, `,"overlay":true}`)
+			obsws_request(conn, "SetInputSettings", strings.to_string(b))
+			continue
+		}
+
 		value: string
 		switch kind {
 		case .Progress:      value = fmt.tprintf("%d / %d bosses", killed, total)
@@ -691,6 +752,7 @@ obsws_push_update :: proc() {
 		case .Character:     value = character
 		case .Region:        value = region_text
 		case .Region_Bosses: value = region_bosses
+		case .Overlay:       // handled above
 		}
 
 		b := strings.builder_make(context.temp_allocator)

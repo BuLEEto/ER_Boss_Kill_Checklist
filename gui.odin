@@ -119,6 +119,7 @@ Port_Committed :: struct {}
 
 Overlay_Mode_Selected :: distinct string
 Overlay_Bg_Selected :: distinct string
+Overlay_Align_Selected :: distinct string
 Overlay_Count_Changed :: distinct int
 Overlay_Region_Selected :: distinct string
 Obs_Source_Toggled :: struct {
@@ -177,6 +178,7 @@ Msg :: union {
 	Port_Committed,
 	Overlay_Mode_Selected,
 	Overlay_Bg_Selected,
+	Overlay_Align_Selected,
 	Overlay_Count_Changed,
 	Overlay_Region_Selected,
 	Obs_Source_Toggled,
@@ -428,6 +430,14 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		settings_set_string(&app.settings.overlay_bg, string(v))
 		app_save_settings()
 
+	case Overlay_Align_Selected:
+		sync.guard(&app.mu)
+		settings_set_string(&app.settings.overlay_align, string(v))
+		app_save_settings()
+		// The browser source's URL carries the alignment, so it needs
+		// resending for the change to reach OBS.
+		out = gui_after_data_change(out)
+
 	case Overlay_Count_Changed:
 		sync.guard(&app.mu)
 		app.settings.overlay_next_count = clamp(int(v), 1, 50)
@@ -457,6 +467,7 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		case .Character:     app.settings.obsws_send_character = v.on
 		case .Region:        app.settings.obsws_send_region = v.on
 		case .Region_Bosses: app.settings.obsws_send_region_bosses = v.on
+		case .Overlay:       app.settings.obsws_send_overlay = v.on
 		}
 		app_save_settings()
 

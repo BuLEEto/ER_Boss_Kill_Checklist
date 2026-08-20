@@ -189,6 +189,21 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 	mode := len(mode_param) > 0 ? mode_param : app.settings.overlay_mode
 	show_deaths := app.settings.show_deaths || deaths_param == "true"
 
+	// Rendered into <body class="...">, rather than left to the page's JS
+	// to add on load. The overlay reloads itself on every kill, so a
+	// class applied after paint means a visible flash of the unaligned
+	// layout each time. overlay.js still applies it too, which is
+	// harmless and keeps a hand-written URL working.
+	align_param, _ := http.request_query(req, "align")
+	bg_param, _ := http.request_query(req, "bg")
+	align := len(align_param) > 0 ? align_param : app.settings.overlay_align
+	bg := len(bg_param) > 0 ? bg_param : app.settings.overlay_bg
+
+	classes := make([dynamic]string, context.temp_allocator)
+	if align == "right" do append(&classes, "align-right")
+	if bg == "green" || bg == "magenta" do append(&classes, fmt.tprintf("bg-%s", bg))
+	body_class := strings.join(classes[:], " ", context.temp_allocator)
+
 	focus_region := parse_int_default(region_param, -1)
 	next_count := parse_int_default(count_param, app.settings.overlay_next_count)
 	if next_count < 1 do next_count = 8
@@ -255,6 +270,7 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 		regions:           []Overlay_Region_Summary,
 		bosses:            []Overlay_Boss_View,
 		focus_region_name: string,
+		body_class:        string,
 	}{
 		save_loaded       = app.save_loaded,
 		slot_name         = slot_name,
@@ -270,6 +286,7 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 		regions           = region_summaries,
 		bosses            = bosses[:],
 		focus_region_name = focus_region_name,
+		body_class        = body_class,
 	}
 
 	http.template_respond_with(res, tpl, data)
