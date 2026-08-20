@@ -24,7 +24,17 @@ Skald in turn bundles the following, acknowledged in full at
   redistribution of the Twemoji artwork. The licence requires the
   attribution line below, which is also shown in the app's About tab:
 
-  > Twemoji by Twitter, Inc. and contributors — CC-BY 4.0
+  > Twemoji by Twitter, Inc. and contributors — CC-BY 4.0 —
+  > <https://twemoji.twitter.com>
+
+  Reproduced as the bundled font's own notice specifies it. "Twitter,
+  Inc." is the copyright holder named when the artwork was licensed;
+  the company's 2023 rename to X Corp doesn't alter an attribution the
+  licence already fixed, and Twemoji itself has been community-
+  maintained since Twitter archived it in 2022. The `twemoji.twitter.com`
+  URL is part of the designated attribution and is reproduced as given,
+  though it no longer resolves — the live project is at
+  <https://github.com/jdecked/twemoji>.
 
 - **Unicode Character Database** — © Unicode, Inc. Property tables that
   runa embeds at compile time; each file keeps its own copyright header

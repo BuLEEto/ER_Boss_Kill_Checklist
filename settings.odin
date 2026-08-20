@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import sb "src/libs/sbcrypto"
 
 // ============================================================================
 // Settings
@@ -29,6 +30,15 @@ import "core:strings"
 APP_CONFIG_DIR :: "er-boss-checklist"
 SETTINGS_FILE :: "settings.json"
 
+// How often the save file is checked. The floor is 5s because Elden Ring
+// writes its save on its own schedule — polling faster can't surface a
+// kill any sooner, it just offers precision the game doesn't provide.
+// Each poll is an mtime check; the 25 MB read only happens when that
+// changed.
+POLL_SECONDS_MIN :: 5
+POLL_SECONDS_MAX :: 60
+POLL_SECONDS_DEFAULT :: 5
+
 // Bumped when a field changes meaning and needs migrating. Unknown-but-
 // newer versions are still loaded; fields we don't recognise are ignored
 // by the JSON decoder, and fields we expect but are absent keep the
@@ -36,7 +46,8 @@ SETTINGS_FILE :: "settings.json"
 //
 //   1  first version written to the config directory
 //   2  "elden" replaced "dark" as the default theme
-SETTINGS_VERSION :: 2
+//   3  obsws password encrypted at rest, under a new key name
+SETTINGS_VERSION :: 3
 
 Settings :: struct {
 	version: int `json:"version"`,
@@ -68,7 +79,9 @@ Settings :: struct {
 	obsws_host:              string `json:"obsws_host"`,
 	obsws_port:              int    `json:"obsws_port"`,
 	obsws_remember_password: bool   `json:"obsws_remember_password"`,
-	obsws_password:          string `json:"obsws_password"`,
+	// Encrypted at rest — see obsws_password_enc below and
+	// src/libs/sbcrypto. Held in memory decrypted.
+	obsws_password:          string `json:"obsws_password_enc"`,
 
 	// GUI
 	window_x:         int    `json:"window_x"`,
@@ -88,7 +101,7 @@ default_settings :: proc() -> Settings {
 		active_slot  = -1,
 		boss_list    = "standard",
 		show_deaths  = false,
-		poll_seconds = 3,
+		poll_seconds = POLL_SECONDS_DEFAULT,
 
 		server_enabled = true,
 		server_port    = 3000,
@@ -213,7 +226,16 @@ load_settings_file :: proc(allocator := context.allocator) -> (s: Settings, err:
 	s.overlay_bg     = strings.clone(decoded.overlay_bg, allocator)
 	s.obs_text_dir   = strings.clone(decoded.obs_text_dir, allocator)
 	s.obsws_host     = strings.clone(decoded.obsws_host, allocator)
-	s.obsws_password = strings.clone(decoded.obsws_password, allocator)
+
+	// A value that won't open is one this machine didn't write: another
+	// machine's config, a corrupted file, or a plaintext password from a
+	// version before this field was encrypted. In every case the right
+	// move is to drop it and let the user re-enter it once.
+	if plain, ok := sb.decrypt_string(decoded.obsws_password, allocator); ok {
+		s.obsws_password = plain
+	} else {
+		s.obsws_password = strings.clone("", allocator)
+	}
 	s.theme          = strings.clone(decoded.theme, allocator)
 
 	settings_apply_bounds(&s)
@@ -236,7 +258,13 @@ migrate_settings :: proc(s: ^Settings) {
 save_settings_file :: proc(s: Settings) -> os.Error {
 	out := s
 	out.version = SETTINGS_VERSION
-	if !out.obsws_remember_password {
+
+	// The password is the one field that never goes to disk as typed.
+	// encrypt_string returns "" if this machine can't produce a key, in
+	// which case we store nothing rather than falling back to plaintext.
+	if out.obsws_remember_password {
+		out.obsws_password = sb.encrypt_string(out.obsws_password, context.temp_allocator)
+	} else {
 		out.obsws_password = ""
 	}
 
@@ -265,7 +293,9 @@ write_file_atomic :: proc(path: string, data: []byte) -> os.Error {
 // Clamp anything a hand-edited file could put out of range, so bad input
 // degrades to a working app rather than a broken one.
 settings_apply_bounds :: proc(s: ^Settings) {
-	if s.poll_seconds < 1 || s.poll_seconds > 60 do s.poll_seconds = 3
+	if s.poll_seconds < POLL_SECONDS_MIN || s.poll_seconds > POLL_SECONDS_MAX {
+		s.poll_seconds = POLL_SECONDS_DEFAULT
+	}
 	if s.server_port < 1 || s.server_port > 65535 do s.server_port = 3000
 	if s.obsws_port < 1 || s.obsws_port > 65535 do s.obsws_port = 4455
 	if s.overlay_next_count < 1 || s.overlay_next_count > 50 do s.overlay_next_count = 8

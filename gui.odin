@@ -55,6 +55,9 @@ Gui :: struct {
 	last_mtime: i64,
 	poll_busy:  bool,
 
+	// Help sheet currently open, or .None
+	help_topic: Help_Topic,
+
 	// Transient feedback
 	toast_msg:  string,
 	toast_kind: skald.Toast_Kind,
@@ -135,6 +138,9 @@ Obsws_Status_Changed :: struct {
 	message:   string, // heap; owned by update
 }
 
+Help_Opened :: distinct Help_Topic
+Help_Closed :: struct {}
+
 Toast_Dismissed :: struct {}
 Window_Changed :: distinct skald.Window_State
 
@@ -178,6 +184,8 @@ Msg :: union {
 	Obsws_Remember_Set,
 	Obsws_Connect_Requested,
 	Obsws_Status_Changed,
+	Help_Opened,
+	Help_Closed,
 	Toast_Dismissed,
 	Window_Changed,
 }
@@ -323,7 +331,7 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 
 	case Poll_Rate_Changed:
 		sync.guard(&app.mu)
-		app.settings.poll_seconds = clamp(int(v), 1, 60)
+		app.settings.poll_seconds = clamp(int(v), POLL_SECONDS_MIN, POLL_SECONDS_MAX)
 		app_save_settings()
 
 	case Show_Deaths_Set:
@@ -513,6 +521,12 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		// pushing reads the boss list, and only the GUI thread may do that.
 		if v.connected do obsws_push_update()
 
+	case Help_Opened:
+		out.help_topic = Help_Topic(v)
+
+	case Help_Closed:
+		out.help_topic = .None
+
 	case Toast_Dismissed:
 		out.toast_on = false
 
@@ -540,6 +554,11 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 gui_apply_save :: proc(s: Gui, path: string, slot: int) -> Gui {
 	out := s
 	sync.guard(&app.mu)
+
+	// Captured before anything changes: "was the app unconfigured when
+	// the user started this?" decides whether finishing counts as
+	// completing first-run setup.
+	was_unconfigured := !app.save_loaded || app.settings.active_slot < 0
 
 	// Re-picking the file you're already on shouldn't cost you your
 	// character. app_set_save_path clears the slot because a slot index
@@ -577,7 +596,15 @@ gui_apply_save :: proc(s: Gui, path: string, slot: int) -> Gui {
 		app_save_settings()
 		out = gui_after_data_change(out)
 		out.save_dialog_open = false
-		out.tab = .Checklist
+
+		// Only sweep the user to the checklist when they had nothing set
+		// up — that's the first-run flow finishing. Someone who went to
+		// Setup deliberately to change character or boss list expects to
+		// still be on Setup afterwards, not to be thrown somewhere else
+		// mid-task.
+		if was_unconfigured {
+			out.tab = .Checklist
+		}
 		return gui_toast(out, fmt.tprintf("Tracking %s", app.slots[chosen].name), .Success)
 	}
 

@@ -357,7 +357,10 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn) {
 	sources := OBS_SOURCES
 	for name in sources {
 		// CreateInput fails harmlessly when the source already exists,
-		// which saves a GetInputList round trip.
+		// which saves a GetInputList round trip — and, importantly, means
+		// we never overwrite the styling of a source the user has already
+		// set up. New sources get the defaults below; existing ones are
+		// left exactly as they are.
 		b := strings.builder_make(context.temp_allocator)
 		strings.write_string(&b, `{"sceneName":"`)
 		json_escape_string(&b, scene)
@@ -365,9 +368,40 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn) {
 		json_escape_string(&b, name)
 		strings.write_string(&b, `","inputKind":"`)
 		json_escape_string(&b, kind)
-		strings.write_string(&b, `","inputSettings":{"text":""},"sceneItemEnabled":true}`)
+		strings.write_string(&b, `","inputSettings":`)
+		strings.write_string(&b, obsws_default_text_settings(kind))
+		strings.write_string(&b, `,"sceneItemEnabled":true}`)
 		obsws_request(conn, "CreateInput", strings.to_string(b))
 	}
+}
+
+// Settings a freshly-created text source starts with, so it's legible
+// over gameplay the moment it appears instead of being 12 px black text
+// on a dark scene.
+//
+// The two text plugins don't share a settings schema: text_gdiplus takes
+// a font object plus `outline`, text_ft2_source takes `font` with
+// `face`/`size` and has no outline of its own (users add a filter). Send
+// each what it understands — OBS ignores unknown keys, but sending the
+// wrong font shape means no font is applied at all.
+@(private = "file")
+obsws_default_text_settings :: proc(kind: string) -> string {
+	COLOUR :: 4294967295 // 0xFFFFFFFF — white, ABGR with full alpha
+
+	if strings.has_prefix(kind, "text_gdiplus") {
+		return fmt.tprintf(
+			`{{"text":"","color":%d,"outline":true,"outline_color":4278190080,` +
+			`"outline_size":2,"font":{{"face":"Arial","size":36,"style":"Bold","flags":0}}}}`,
+			COLOUR,
+		)
+	}
+
+	// text_ft2_source_v2 (Linux, and Windows installs without GDI+).
+	return fmt.tprintf(
+		`{{"text":"","color1":%d,"color2":%d,"outline":true,` +
+		`"font":{{"face":"Sans Serif","size":36,"style":"Bold","flags":0}}}}`,
+		COLOUR, COLOUR,
+	)
 }
 
 // Round-trip helper for the two setup queries. Unlike the fire-and-

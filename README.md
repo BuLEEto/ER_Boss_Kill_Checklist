@@ -79,6 +79,11 @@ Run the app. On first launch:
 Text feeling small? **Setup → Text size**. It scales the whole interface, not
 just the type.
 
+The save-file check runs every 5 seconds by default. That's also the floor —
+Elden Ring writes its save on its own schedule, so polling faster can't surface
+a kill any sooner. Each check is just an mtime comparison; the save is only
+re-read when it actually changed.
+
 Everything you choose is saved immediately to your config directory, so the
 app comes back the way you left it:
 
@@ -92,6 +97,8 @@ The **About** tab shows the exact path.
 ## OBS
 
 All three options live on the **OBS** tab, and they can run at the same time.
+Each has a **? How do I use this** button with step-by-step OBS instructions —
+which source type to add, where the setting lives, and what each value is.
 
 ### Browser source (best looking)
 
@@ -125,11 +132,17 @@ works on every OBS version:
 Enable OBS's own WebSocket server (**Tools → WebSocket Server Settings**), then
 enter the host, port and password on the OBS tab and hit **Connect**. The app
 creates four text sources in your current scene — `ER Progress`, `ER Next Boss`,
-`ER Deaths`, `ER Character` — and keeps them updated. Style and position them in
-OBS however you like; the app only ever changes their text.
+`ER Deaths`, `ER Character` — with a bold white font and a dark outline so
+they're legible over gameplay straight away. Restyle and position them in OBS
+however you like: the app only ever changes their text, and never touches a
+source that already exists.
 
 The password is only written to `settings.json` if you tick *Remember the
-password*, and it's stored in plain text, so leave it off on a shared machine.
+password*, and it's encrypted first — AES-256-GCM under a key derived from a
+per-machine identifier (`/etc/machine-id` on Linux, the registry's `MachineGuid`
+on Windows). A config file copied to another machine, synced to a cloud drive
+or pasted into a bug report is inert. It is *not* protection from something
+already running as you; that needs the OS keychain.
 
 ### Mobile companion
 
@@ -172,6 +185,8 @@ For Seamless Co-op, the file is `ER0000.co2` under the mod's app ID instead of `
 | `save_parser.odin` | Elden Ring save file parser (sequential binary format) |
 | `save_scan.odin` | Steam library / Proton prefix save discovery |
 | `theme.odin` | Elden Ring palette and the text-size scale |
+| `gui_help.odin` | In-app help sheets for the three OBS integrations |
+| `src/libs/sbcrypto/` | AES-256-GCM at-rest encryption for the saved password |
 | `boss_data.odin` | Boss list loading and filtering |
 | `platform_*.odin` | LAN IP detection, per platform |
 | `src/libs/http/` | HTTP server library |

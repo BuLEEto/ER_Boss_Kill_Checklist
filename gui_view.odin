@@ -38,8 +38,9 @@ gui_view :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		skald.divider(ctx),
 		skald.flex(1, body),
 		view_status_bar(s, ctx),
-		// Returns an empty spacer when closed, so it costs nothing here.
+		// Both return an empty spacer when closed, so they cost nothing here.
 		view_save_dialog(s, ctx),
+		view_help_dialog(s, ctx),
 		skald.toast(
 			ctx,
 			s.toast_on,
@@ -89,9 +90,52 @@ content_width :: proc(ctx: ^skald.Ctx(Msg)) -> f32 {
 	return w
 }
 
-paragraph :: proc(ctx: ^skald.Ctx(Msg), str: string, color: skald.Color, size: f32) -> skald.View {
-	return skald.text(str, color, size, max_width = content_width(ctx))
+// `width` of 0 means "the width of a scrolling tab body". Anything inside
+// a dialog must pass its own — a dialog card is far narrower than the
+// window, and measuring the window would run the text off the card.
+paragraph :: proc(
+	ctx:   ^skald.Ctx(Msg),
+	str:   string,
+	color: skald.Color,
+	size:  f32,
+	width: f32 = 0,
+) -> skald.View {
+	w := width if width > 0 else content_width(ctx)
+	return skald.text(str, color, size, max_width = w)
 }
+
+// Stable widget ids.
+//
+// Skald keys retained widget state (focus, open, pressed) off an
+// auto-generated call-site counter. A `select` builds its option rows only
+// while the dropdown is open, so opening one shifts the auto-id of every
+// widget built after it — and conditional rows (an error alert, the
+// overlay controls that only appear when the server is up) shift them
+// again. Either way the state read next frame belongs to a different
+// widget, which shows up as controls that misfire.
+//
+// Skald's documented remedy is an explicit id from `hash_id`, which lands
+// in a reserved high range that auto-ids never touch. Everything stateful
+// on the Setup and OBS tabs gets one.
+ID_CHARACTER      :: "setup.character"
+ID_BOSS_LIST      :: "setup.boss_list"
+ID_POLL_RATE      :: "setup.poll_rate"
+ID_THEME          :: "setup.theme"
+ID_UI_SCALE       :: "setup.ui_scale"
+ID_SERVER_TOGGLE  :: "obs.server"
+ID_PORT           :: "obs.port"
+ID_OVERLAY_MODE   :: "obs.overlay_mode"
+ID_OVERLAY_COUNT  :: "obs.overlay_count"
+ID_OVERLAY_BG     :: "obs.overlay_bg"
+ID_SHOW_DEATHS    :: "obs.show_deaths"
+ID_TEXT_TOGGLE    :: "obs.text_enabled"
+ID_TEXT_DIR       :: "obs.text_dir"
+ID_WS_TOGGLE      :: "obs.ws_enabled"
+ID_WS_HOST        :: "obs.ws_host"
+ID_WS_PORT        :: "obs.ws_port"
+ID_WS_PASS        :: "obs.ws_pass"
+ID_WS_REMEMBER    :: "obs.ws_remember"
+ID_HIDE_COMPLETED :: "checklist.hide_completed"
 
 // ----------------------------------------------------------------------------
 // Setup tab
@@ -144,7 +188,7 @@ view_setup :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		} else {
 			append(&rows, skald.select(
 				ctx, active_slot_label(ctx), names[:], on_slot_selected, width = 320,
-				placeholder = "Pick a character",
+				placeholder = "Pick a character", id = skald.hash_id(ID_CHARACTER),
 			))
 		}
 	}
@@ -158,6 +202,7 @@ view_setup :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		boss_list_labels(),
 		on_boss_list_selected,
 		width = 320,
+		id = skald.hash_id(ID_BOSS_LIST),
 	))
 
 	// -- Options ------------------------------------------------------------
@@ -168,24 +213,22 @@ view_setup :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		fmt.tprintf("Check every %ds", app.settings.poll_seconds),
 		skald.slider(
 			ctx, f32(app.settings.poll_seconds), on_poll_rate,
-			min_value = 1, max_value = 60, step = 1, width = 240,
+			min_value = POLL_SECONDS_MIN, max_value = POLL_SECONDS_MAX,
+			step = 1, width = 240, id = skald.hash_id(ID_POLL_RATE),
 		),
 		label_width = 160,
-	))
-	append(&rows, skald.checkbox(
-		ctx, app.settings.show_deaths, "Show death count in the overlay", on_show_deaths,
 	))
 	append(&rows, skald.form_row(ctx, "Theme",
 		skald.select(
 			ctx, theme_label(app.settings.theme), theme_labels(),
-			on_theme_selected, width = 200,
+			on_theme_selected, width = 200, id = skald.hash_id(ID_THEME),
 		),
 		label_width = 160,
 	))
 	append(&rows, skald.form_row(ctx, "Text size",
 		skald.select(
 			ctx, ui_scale_label(app.settings.ui_scale), ui_scale_labels(),
-			on_ui_scale_selected, width = 200,
+			on_ui_scale_selected, width = 200, id = skald.hash_id(ID_UI_SCALE),
 		),
 		label_width = 160,
 	))
@@ -420,7 +463,8 @@ view_checklist :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		skald.button(ctx, "Expand all", Msg(Expand_All(true))),
 		skald.button(ctx, "Collapse all", Msg(Expand_All(false))),
 		skald.flex(1, skald.spacer(0)),
-		skald.checkbox(ctx, app.settings.hide_completed, "Hide cleared regions", on_hide_completed),
+		skald.checkbox(ctx, app.settings.hide_completed, "Hide cleared regions", on_hide_completed,
+			id = skald.hash_id(ID_HIDE_COMPLETED)),
 		spacing     = th.spacing.sm,
 		cross_align = .Center,
 	)
@@ -537,12 +581,15 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		"The original route, and the best-looking one: OBS renders the overlay page directly.",
 		th.color.fg_muted, th.font.size_sm,
 	))
+	append(&rows, help_button(ctx, .Browser_Source))
 
 	append(&rows, skald.row(
-		skald.toggle(ctx, app.settings.server_enabled, "Run the web server", on_server_set),
+		skald.toggle(ctx, app.settings.server_enabled, "Run the web server", on_server_set,
+			id = skald.hash_id(ID_SERVER_TOGGLE)),
 		skald.flex(1, skald.spacer(0)),
 		skald.text("Port", th.color.fg_muted, th.font.size_sm),
-		skald.text_input(ctx, s.port_draft, on_port_draft, width = 90),
+		skald.text_input(ctx, s.port_draft, on_port_draft, width = 90,
+			id = skald.hash_id(ID_PORT)),
 		skald.button(ctx, "Apply", Msg(Port_Committed{})),
 		spacing     = th.spacing.sm,
 		cross_align = .Center,
@@ -563,6 +610,7 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 			skald.segmented(
 				ctx, {"Summary", "Next up", "Region"},
 				overlay_mode_index(app.settings.overlay_mode), on_overlay_mode,
+				id = skald.hash_id(ID_OVERLAY_MODE),
 			),
 			label_width = 120,
 		))
@@ -573,6 +621,7 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 				skald.slider(
 					ctx, f32(app.settings.overlay_next_count), on_overlay_count,
 					min_value = 1, max_value = 25, step = 1, width = 220,
+					id = skald.hash_id(ID_OVERLAY_COUNT),
 				),
 				label_width = 120,
 			))
@@ -582,12 +631,17 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 			skald.segmented(
 				ctx, {"Transparent", "Green", "Magenta"},
 				overlay_bg_index(app.settings.overlay_bg), on_overlay_bg,
+				id = skald.hash_id(ID_OVERLAY_BG),
 			),
 			label_width = 120,
 		))
 		append(&rows, paragraph(ctx,
 			"Transparent works with a Browser Source. Use a chroma key colour only if you're capturing a window instead.",
 			th.color.fg_muted, th.font.size_xs,
+		))
+		append(&rows, skald.checkbox(
+			ctx, app.settings.show_deaths, "Include death count", on_show_deaths,
+			id = skald.hash_id(ID_SHOW_DEATHS),
 		))
 
 		overlay_url := overlay_url_string(context.temp_allocator)
@@ -602,28 +656,22 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		"Writes plain text files you point OBS \"Text (GDI+/FreeType)\" sources at with \"Read from file\". No browser source, no CPU cost, works on any OBS version.",
 		th.color.fg_muted, th.font.size_sm,
 	))
+	append(&rows, help_button(ctx, .Text_Files))
 	append(&rows, skald.toggle(
 		ctx, app.settings.obs_text_enabled, "Write text files", on_obs_text_set,
+		id = skald.hash_id(ID_TEXT_TOGGLE),
 	))
 	append(&rows, skald.row(
 		skald.flex(1, skald.text_input(
 			ctx, s.obs_text_dir_draft, on_obs_text_dir,
 			placeholder = obs_text_default_dir(context.temp_allocator),
+			id = skald.hash_id(ID_TEXT_DIR),
 		), min_main = 240),
 		skald.button(ctx, "Browse…", Msg(Obs_Text_Dir_Browse{})),
 		skald.button(ctx, "Apply", Msg(Obs_Text_Dir_Committed{})),
 		spacing     = th.spacing.sm,
 		cross_align = .Center,
 	))
-	if app.settings.obs_text_enabled {
-		names := make([dynamic]skald.View, context.temp_allocator)
-		for f in OBS_TEXT_FILES {
-			append(&names, skald.text(
-				fmt.tprintf("%s — %s", f.name, f.description), th.color.fg_muted, th.font.size_xs,
-			))
-		}
-		append(&rows, skald.col(..names[:], spacing = 2, cross_align = .Stretch))
-	}
 
 	// -- obs-websocket ------------------------------------------------------
 	append(&rows, skald.spacer(th.spacing.sm))
@@ -632,26 +680,31 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		"The way most OBS integrations work. Connects to OBS directly and pushes progress into text sources — enable the WebSocket server in OBS under Tools → WebSocket Server Settings.",
 		th.color.fg_muted, th.font.size_sm,
 	))
-	append(&rows, skald.toggle(ctx, app.settings.obsws_enabled, "Connect to OBS", on_obsws_set))
+	append(&rows, help_button(ctx, .Obs_Websocket))
+	append(&rows, skald.toggle(ctx, app.settings.obsws_enabled, "Connect to OBS", on_obsws_set,
+		id = skald.hash_id(ID_WS_TOGGLE)))
 	append(&rows, skald.row(
 		skald.text("Host", th.color.fg_muted, th.font.size_sm),
-		skald.text_input(ctx, s.obsws_host_draft, on_obsws_host, width = 160),
+		skald.text_input(ctx, s.obsws_host_draft, on_obsws_host, width = 160,
+			id = skald.hash_id(ID_WS_HOST)),
 		skald.text("Port", th.color.fg_muted, th.font.size_sm),
-		skald.text_input(ctx, s.obsws_port_draft, on_obsws_port, width = 90),
+		skald.text_input(ctx, s.obsws_port_draft, on_obsws_port, width = 90,
+			id = skald.hash_id(ID_WS_PORT)),
 		spacing     = th.spacing.sm,
 		cross_align = .Center,
 	))
 	append(&rows, skald.row(
 		skald.text("Password", th.color.fg_muted, th.font.size_sm),
-		skald.text_input(ctx, s.obsws_pass_draft, on_obsws_pass, width = 220, password = true),
+		skald.text_input(ctx, s.obsws_pass_draft, on_obsws_pass, width = 220, password = true,
+			id = skald.hash_id(ID_WS_PASS)),
 		skald.button(ctx, "Connect", Msg(Obsws_Connect_Requested{})),
 		spacing     = th.spacing.sm,
 		cross_align = .Center,
 	))
 	append(&rows, skald.checkbox(
 		ctx, app.settings.obsws_remember_password,
-		"Remember the password (stored in plain text in settings.json)",
-		on_obsws_remember,
+		"Remember the password (encrypted, tied to this machine)",
+		on_obsws_remember, id = skald.hash_id(ID_WS_REMEMBER),
 	))
 
 	status, state := obsws_status_text()
@@ -710,9 +763,14 @@ view_about :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 			"GUI by Skald (zlib) · SDL3 (zlib) · Inter typeface (SIL OFL 1.1)",
 			th.color.fg_muted, th.font.size_sm,
 		),
-		// Required by the CC-BY-4.0 licence on the emoji font Skald embeds.
+		// Reproduced verbatim: this is the attribution the bundled font's
+		// own notice designates, and CC-BY requires the one the licensor
+		// specified. "Twitter, Inc." is the copyright holder named when
+		// the artwork was licensed — the 2023 rename to X Corp doesn't
+		// change an attribution already fixed by the licence, and the
+		// project is community-maintained now in any case.
 		skald.text(
-			"Twemoji by Twitter, Inc. and contributors — CC-BY 4.0",
+			"Twemoji by Twitter, Inc. and contributors — CC-BY 4.0 — https://twemoji.twitter.com",
 			th.color.fg_muted, th.font.size_sm,
 		),
 		skald.text(
