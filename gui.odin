@@ -50,6 +50,8 @@ Gui :: struct {
 	obsws_host_draft:   string,
 	obsws_port_draft:   string,
 	obsws_pass_draft:   string,
+	font_family_draft:  string,
+	custom_css_draft:   string,
 
 	// Save-file polling
 	last_mtime: i64,
@@ -121,6 +123,16 @@ Overlay_Mode_Selected :: distinct string
 Overlay_Bg_Selected :: distinct string
 Overlay_Align_Selected :: distinct string
 Obs_Source_Style_Selected :: distinct string
+
+Overlay_Accent_Set :: distinct string
+Overlay_Text_Color_Set :: distinct string
+Overlay_Font_Size_Set :: distinct int
+Overlay_Outline_Set :: distinct bool
+Overlay_Font_Draft :: distinct string
+Overlay_Font_Committed :: struct {}
+Overlay_Css_Draft :: distinct string
+Overlay_Css_Committed :: struct {}
+Overlay_Theme_Reset :: struct {}
 Overlay_Count_Changed :: distinct int
 Overlay_Region_Selected :: distinct string
 Obs_Source_Toggled :: struct {
@@ -181,6 +193,15 @@ Msg :: union {
 	Overlay_Bg_Selected,
 	Overlay_Align_Selected,
 	Obs_Source_Style_Selected,
+	Overlay_Accent_Set,
+	Overlay_Text_Color_Set,
+	Overlay_Font_Size_Set,
+	Overlay_Outline_Set,
+	Overlay_Font_Draft,
+	Overlay_Font_Committed,
+	Overlay_Css_Draft,
+	Overlay_Css_Committed,
+	Overlay_Theme_Reset,
 	Overlay_Count_Changed,
 	Overlay_Region_Selected,
 	Obs_Source_Toggled,
@@ -217,6 +238,8 @@ gui_init :: proc() -> Gui {
 	g.obsws_host_draft   = strings.clone(app.settings.obsws_host)
 	g.obsws_pass_draft   = strings.clone(app.settings.obsws_password)
 	g.obs_text_dir_draft = strings.clone(app.settings.obs_text_dir)
+	g.font_family_draft  = strings.clone(app.settings.overlay_font_family)
+	g.custom_css_draft   = strings.clone(app.settings.overlay_custom_css)
 
 	g.expanded = make([dynamic]bool, len(app.regions))
 	// Regions with something left to kill start open; finished ones
@@ -471,6 +494,67 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 			return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
 		}
 
+	case Overlay_Accent_Set:
+		sync.guard(&app.mu)
+		settings_set_string(&app.settings.overlay_accent, string(v))
+		app_save_settings()
+		out = gui_theme_changed(out)
+
+	case Overlay_Text_Color_Set:
+		sync.guard(&app.mu)
+		settings_set_string(&app.settings.overlay_text_color, string(v))
+		app_save_settings()
+		out = gui_theme_changed(out)
+
+	case Overlay_Font_Size_Set:
+		sync.guard(&app.mu)
+		app.settings.overlay_font_size = clamp(int(v), 12, 96)
+		app_save_settings()
+		out = gui_theme_changed(out)
+
+	case Overlay_Outline_Set:
+		sync.guard(&app.mu)
+		app.settings.overlay_outline = bool(v)
+		app_save_settings()
+		out = gui_theme_changed(out)
+
+	case Overlay_Font_Draft:
+		delete(out.font_family_draft)
+		out.font_family_draft = strings.clone(string(v))
+
+	case Overlay_Font_Committed:
+		sync.guard(&app.mu)
+		settings_set_string(
+			&app.settings.overlay_font_family, strings.trim_space(out.font_family_draft),
+		)
+		app_save_settings()
+		out = gui_theme_changed(out)
+
+	case Overlay_Css_Draft:
+		delete(out.custom_css_draft)
+		out.custom_css_draft = strings.clone(string(v))
+
+	case Overlay_Css_Committed:
+		sync.guard(&app.mu)
+		settings_set_string(&app.settings.overlay_custom_css, out.custom_css_draft)
+		app_save_settings()
+		out = gui_theme_changed(out)
+
+	case Overlay_Theme_Reset:
+		sync.guard(&app.mu)
+		defaults := default_settings()
+		settings_set_string(&app.settings.overlay_accent, defaults.overlay_accent)
+		settings_set_string(&app.settings.overlay_text_color, defaults.overlay_text_color)
+		settings_set_string(&app.settings.overlay_font_family, "")
+		settings_set_string(&app.settings.overlay_custom_css, "")
+		app.settings.overlay_font_size = defaults.overlay_font_size
+		app.settings.overlay_outline = defaults.overlay_outline
+		app_save_settings()
+
+		delete(out.font_family_draft); out.font_family_draft = strings.clone("")
+		delete(out.custom_css_draft);  out.custom_css_draft = strings.clone("")
+		out = gui_theme_changed(out)
+
 	case Obs_Source_Toggled:
 		sync.guard(&app.mu)
 		switch v.kind {
@@ -713,6 +797,15 @@ gui_after_data_change :: proc(s: Gui) -> Gui {
 	if app.settings.obsws_enabled {
 		obsws_push_update()
 	}
+	return s
+}
+
+// The pages render the theme server-side, so the browser sources only
+// need telling to reload. Nudging the SSE clients does exactly that, and
+// costs nothing when nobody's connected.
+gui_theme_changed :: proc(s: Gui) -> Gui {
+	total, killed := count_bosses(app.regions)
+	sse_broadcast_update(killed, total, app.death_count)
 	return s
 }
 

@@ -130,6 +130,12 @@ ID_OVERLAY_REGION :: "obs.overlay_region"
 ID_ROOMY_LINES    :: "obs.roomy_lines"
 ID_OVERLAY_ALIGN  :: "obs.overlay_align"
 ID_SOURCE_STYLE   :: "obs.source_style"
+ID_THEME_ACCENT   :: "obs.theme_accent"
+ID_THEME_TEXT     :: "obs.theme_text"
+ID_THEME_SIZE     :: "obs.theme_size"
+ID_THEME_FONT     :: "obs.theme_font"
+ID_THEME_OUTLINE  :: "obs.theme_outline"
+ID_THEME_CSS      :: "obs.theme_css"
 ID_OVERLAY_BG     :: "obs.overlay_bg"
 ID_SHOW_DEATHS    :: "obs.show_deaths"
 ID_TEXT_TOGGLE    :: "obs.text_enabled"
@@ -673,6 +679,10 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		append(&rows, view_copy_row(ctx, "Overlay URL", overlay_url))
 		append(&rows, view_copy_row(ctx, "Mobile view", mobile_url_string(context.temp_allocator)))
 	}
+
+	// -- Appearance ---------------------------------------------------------
+	append(&rows, skald.spacer(th.spacing.sm))
+	for v in view_overlay_theme(s, ctx) do append(&rows, v)
 
 	// -- Text files ---------------------------------------------------------
 	append(&rows, skald.spacer(th.spacing.sm))

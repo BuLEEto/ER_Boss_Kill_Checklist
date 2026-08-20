@@ -193,9 +193,19 @@ sources.
 
 **Send to OBS** on the same tab picks which of the seven you want.
 
-#### Styling and aligning individual sources (Web style)
+#### Appearance
 
-Each is its own browser source, so each has its own **Custom CSS** box:
+**Appearance** on the OBS tab styles the overlay and every widget at once —
+accent colour, text colour, size, font family, outline, plus an
+**Advanced — custom CSS** box for anything else.
+
+It lives in the app rather than being left to OBS for a specific reason: OBS's
+Custom CSS box belongs to a *single source*. With seven sources, theming
+through OBS means pasting the same rules seven times, and again on every tweak.
+The app serves the pages, so one change repaints all of them.
+
+OBS's box still works, and still wins — it's injected after ours — which makes
+it the right place for a one-off override on one source:
 
 ```css
 :root { --gold: #ff4444; --text: #ffffff; }   /* colours */

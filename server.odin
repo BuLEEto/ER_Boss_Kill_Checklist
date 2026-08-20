@@ -274,6 +274,7 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 		bosses:            []Overlay_Boss_View,
 		focus_region_name: string,
 		body_class:        string,
+		theme_css:         string,
 	}{
 		save_loaded       = app.save_loaded,
 		slot_name         = slot_name,
@@ -290,6 +291,7 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 		bosses            = bosses[:],
 		focus_region_name = focus_region_name,
 		body_class        = body_class,
+		theme_css         = overlay_theme_css(),
 	}
 
 	http.template_respond_with(res, tpl, data)
@@ -508,6 +510,7 @@ handle_widget :: proc(req: ^http.Request, res: ^http.Response) {
 		is_list:    bool,
 		show_label: bool,
 		body_class: string,
+		theme_css:  string,
 	}{
 		title      = label,
 		label      = label,
@@ -518,6 +521,7 @@ handle_widget :: proc(req: ^http.Request, res: ^http.Response) {
 		// furniture when you already know what you put on screen.
 		show_label = label_param == "true",
 		body_class = body_class,
+		theme_css  = overlay_theme_css(),
 	}
 
 	http.template_respond_with(res, tpl, data)
@@ -573,4 +577,62 @@ widget_content :: proc(kind: string) -> (label: string, value: string, lines: []
 	case:
 		return "Progress", fmt.tprintf("%d / %d bosses", killed, total), nil
 	}
+}
+
+// ----------------------------------------------------------------------------
+// Overlay theming
+//
+// Built from settings and injected into every page this app serves, so
+// one change repaints the overlay and all the widgets at once. That is
+// the reason to theme here rather than leave it to OBS: OBS's Custom CSS
+// box belongs to a single source, so styling seven sources through it
+// means pasting the same rules seven times and again on every tweak.
+//
+// OBS's box still works, and still wins — it's injected into the page
+// after this block, so it's the right place for a one-off override on a
+// single source.
+// ----------------------------------------------------------------------------
+
+overlay_theme_css :: proc(allocator := context.temp_allocator) -> string {
+	b := strings.builder_make(allocator)
+
+	// Colours ride on the same custom properties the stylesheet already
+	// uses, so changing them repaints everything that references them.
+	fmt.sbprintf(
+		&b,
+		":root{{--gold:%s;--text:%s;}}",
+		app.settings.overlay_accent,
+		app.settings.overlay_text_color,
+	)
+
+	fmt.sbprintf(
+		&b,
+		".widget-value,.widget-line{{font-size:%dpx;}}",
+		app.settings.overlay_font_size,
+	)
+
+	if len(app.settings.overlay_font_family) > 0 {
+		// Quoted, so a family name with spaces works without the user
+		// having to know CSS quoting rules.
+		fmt.sbprintf(&b, "body{{font-family:\"%s\";}}", css_safe(app.settings.overlay_font_family))
+	}
+
+	if !app.settings.overlay_outline {
+		strings.write_string(&b, ".widget-value,.widget-line{text-shadow:none;}")
+	}
+
+	if len(app.settings.overlay_custom_css) > 0 {
+		strings.write_string(&b, "\n")
+		strings.write_string(&b, css_safe(app.settings.overlay_custom_css))
+	}
+
+	return strings.to_string(b)
+}
+
+// Strip the one sequence that could end the <style> element early and
+// turn a stylesheet into markup. Everything else is the user's business —
+// it's their overlay, and a broken rule is a broken rule.
+css_safe :: proc(css: string, allocator := context.temp_allocator) -> string {
+	if !strings.contains(css, "</") do return css
+	return strings.replace_all(css, "</", "<\\/", allocator) or_else css
 }

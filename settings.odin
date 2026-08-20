@@ -71,6 +71,21 @@ Settings :: struct {
 	overlay_bg:         string `json:"overlay_bg"`,         // none | green | magenta
 	overlay_align:      string `json:"overlay_align"`,      // left | center | right
 
+	// How the pages this app serves look. Applied server-side to the
+	// overlay and every widget at once — which is the whole point of
+	// having them here rather than leaving it to OBS. OBS's Custom CSS
+	// box is per source, so theming seven sources through it means
+	// pasting the same rules seven times, and again on every tweak.
+	//
+	// Colours are "#rrggbb". overlay_custom_css is appended last, so it
+	// wins over everything above it.
+	overlay_accent:      string `json:"overlay_accent"`,
+	overlay_text_color:  string `json:"overlay_text_color"`,
+	overlay_font_size:   int    `json:"overlay_font_size"`,
+	overlay_font_family: string `json:"overlay_font_family"`,
+	overlay_outline:     bool   `json:"overlay_outline"`,
+	overlay_custom_css:  string `json:"overlay_custom_css"`,
+
 	// Which region the Region overlay mode, ER Region and region.txt all
 	// follow:
 	//
@@ -164,6 +179,12 @@ default_settings :: proc() -> Settings {
 		overlay_next_count  = 8,
 		overlay_bg          = "none",
 		overlay_align       = "left",
+		overlay_accent      = "#c8a84e", // Erdtree gold, matching the app
+		overlay_text_color  = "#e0dcd0",
+		overlay_font_size   = 28,
+		overlay_font_family = "",        // empty = the stylesheet's default stack
+		overlay_outline     = true,
+		overlay_custom_css  = "",
 		overlay_region_mode = "first",
 		overlay_region_name = "",
 		last_kill_region    = "",
@@ -338,6 +359,10 @@ settings_own_strings :: proc(s: ^Settings, allocator := context.allocator) {
 		&s.overlay_bg,
 		&s.overlay_align,
 		&s.obsws_source_style,
+		&s.overlay_accent,
+		&s.overlay_text_color,
+		&s.overlay_font_family,
+		&s.overlay_custom_css,
 		&s.overlay_region_mode,
 		&s.overlay_region_name,
 		&s.last_kill_region,
@@ -444,6 +469,11 @@ settings_apply_bounds :: proc(s: ^Settings) {
 	case "text", "web": // fine
 	case:               s.obsws_source_style = "text"
 	}
+
+	if s.overlay_font_size < 8 || s.overlay_font_size > 200 do s.overlay_font_size = 28
+	if !is_hex_colour(s.overlay_accent) do s.overlay_accent = "#c8a84e"
+	if !is_hex_colour(s.overlay_text_color) do s.overlay_text_color = "#e0dcd0"
+
 	switch s.theme {
 	case "elden", "dark", "light", "system": // fine
 	case:                                    s.theme = "elden"
@@ -463,6 +493,19 @@ settings_apply_bounds :: proc(s: ^Settings) {
 	if s.overlay_region_mode == "pinned" && len(s.overlay_region_name) == 0 {
 		s.overlay_region_mode = "first"
 	}
+}
+
+// "#rrggbb", and nothing else. These go straight into a stylesheet, so a
+// value that isn't a colour would either break the rule it's in or, if it
+// contained a brace, escape into rules of its own.
+is_hex_colour :: proc(v: string) -> bool {
+	if len(v) != 7 || v[0] != '#' do return false
+	for i in 1 ..< 7 {
+		c := v[i]
+		is_hex := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+		if !is_hex do return false
+	}
+	return true
 }
 
 // ----------------------------------------------------------------------------

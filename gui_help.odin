@@ -147,7 +147,7 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 			Help_Step{
 				"Styling them your way (Web)",
-				"Each one is a separate source, so each has its own Custom CSS box in its properties. Colours are variables:\n\n:root { --gold: #ff4444; --text: #ffffff; }\n\nFor size or spacing, target .widget-value and .widget-line. The app never writes to that box.",
+				"Use Appearance on this tab — accent colour, text colour, size, font and outline apply to every source at once. That's the point of it being here: OBS's Custom CSS box belongs to one source, so styling seven through OBS means pasting the same rules seven times.\n\nAdvanced — custom CSS takes anything the controls don't cover. OBS's own box still works on top, per source, and still wins.",
 			},
 			Help_Step{
 				"Aligning them individually",
