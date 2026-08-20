@@ -31,6 +31,17 @@ matches what stable distros ship), or just use the release tarball — `make tar
 bundles `libSDL3.so.0` next to the binary precisely so those users don't have
 to.
 
+Odin ships `vendor:stb` as C source, and Skald loads PNGs through
+`stb_image`, so the static archives have to be built once per machine after
+installing Odin:
+
+```bash
+make -C "$(dirname "$(command -v odin)")/vendor/stb/src"
+```
+
+Skip it and an otherwise-clean compile ends in a link error about
+`stb_image`. (Windows and macOS Odin installs ship these prebuilt.)
+
 Check the Vulkan side with `vulkaninfo | head`. If that prints device info,
 you're set.
 
@@ -112,7 +123,7 @@ on Linux; update GPU drivers on Windows.
 **`cannot open shared object file: libSDL3.so.0`** — install your distro's SDL3
 package, or use the release tarball, which bundles it.
 
-**Link error mentioning `stb_truetype`** — only happens if you opt into the
-legacy text backend with `-define:SKALD_RUNA=false`. The default backend is
-pure Odin and needs no `stb`. If you do want fontstash, build Odin's stb libs
-once: `make -C $ODIN_ROOT/vendor/stb/src`.
+**Link error mentioning `stb_image`** — Odin's stb archives haven't been
+built on this machine. See the Linux prerequisites above; it's a one-off
+`make -C $ODIN_ROOT/vendor/stb/src`. The same applies to `stb_truetype` if you
+opt into the legacy text backend with `-define:SKALD_RUNA=false`.

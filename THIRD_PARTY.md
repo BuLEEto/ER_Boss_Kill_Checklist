@@ -29,9 +29,11 @@ Skald in turn bundles the following, acknowledged in full at
 - **Unicode Character Database** — © Unicode, Inc. Property tables that
   runa embeds at compile time; each file keeps its own copyright header
   and pointer to <https://www.unicode.org/terms_of_use.html>.
-- **fontstash** (Mikko Mononen), zlib, and **stb** (Sean T. Barrett)
-  `stb_truetype` / `stb_image`, MIT / public domain — only reached on
-  the legacy `-define:SKALD_RUNA=false` text path, which we do not build.
+- **stb** (Sean T. Barrett) — `stb_image`, MIT / public domain. Linked
+  into every build: Skald loads PNGs through it.
+- **fontstash** (Mikko Mononen), zlib, with `stb_truetype` — only
+  reached on the legacy `-define:SKALD_RUNA=false` text path, which we
+  do not build.
 
 ### SDL3
 
