@@ -102,6 +102,10 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 				"Font, size, colour and outline are all OBS's settings, not ours — the app only ever changes the text. A bold font with a dark outline reads best over gameplay.",
 			},
 			Help_Step{
+				"Multi-line files look cramped?",
+				"OBS text sources have no line-height setting, in either the GDI+ or FreeType flavour. The only way to open a list up is to send a blank line between entries — that's the \"Blank line between entries\" tick box under obs-websocket, and it applies to these files too.",
+			},
+			Help_Step{
 				"Repeat for anything else you want",
 				"One source per file. Most people show progress.txt and deaths.txt, and add next_boss.txt if they want a \"coming up\" line.",
 			},

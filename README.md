@@ -149,9 +149,15 @@ Restyle and position them in OBS however you like: the app only ever changes
 their text, and a source that already exists is never created, moved or
 restyled.
 
-**Send to OBS** on the same tab picks which of the six you want. Unticked ones
-are never created in your scene; unticking one that's already there stops it
-updating but leaves it for you to delete.
+**Send to OBS** on the same tab picks which of the six you want. Unticking one
+*hides* it in OBS rather than deleting it — anything you've styled or positioned
+survives, and re-ticking brings it straight back. OBS has no undo for a deleted
+source, so hiding is the safer default; delete it yourself if you want it gone.
+
+OBS text sources have no line-height setting in either flavour — it's been a
+[standing feature request](https://ideas.obsproject.com/posts/1285/text-source-line-height-option)
+for years. **Blank line between entries** is the only lever there is: it sends
+an extra newline between items in the multi-line sources and text files.
 
 The password is only written to `settings.json` if you tick *Remember the
 password*, and it's encrypted first — AES-256-GCM under a key derived from a

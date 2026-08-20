@@ -99,6 +99,12 @@ Settings :: struct {
 	obsws_send_character:     bool `json:"obsws_send_character"`,
 	obsws_send_region:        bool `json:"obsws_send_region"`,
 	obsws_send_region_bosses: bool `json:"obsws_send_region_bosses"`,
+
+	// Blank line between entries in the multi-line outputs. OBS text
+	// sources have no line-height setting — it's been a feature request
+	// for years — so the only way to loosen them up is to send the extra
+	// line ourselves.
+	obs_roomy_lines: bool `json:"obs_roomy_lines"`,
 	// Encrypted at rest — see obsws_password_enc below and
 	// src/libs/sbcrypto. Held in memory decrypted.
 	obsws_password:          string `json:"obsws_password_enc"`,
@@ -143,6 +149,8 @@ default_settings :: proc() -> Settings {
 		obsws_send_character     = true,
 		obsws_send_region        = true,
 		obsws_send_region_bosses = true,
+
+		obs_roomy_lines = true,
 
 		theme    = "elden",
 		ui_scale = 1.15, // Skald's stock 14px body text is small on a big display

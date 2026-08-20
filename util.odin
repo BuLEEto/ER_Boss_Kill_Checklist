@@ -3,6 +3,7 @@ package main
 import "core:fmt"
 import "core:strings"
 
+
 // Escape a string for embedding in JSON. Handles raw bytes safely: valid
 // UTF-8 passes through, anything else becomes \uXXXX rather than
 // producing a document no parser will accept. Character names come
@@ -46,4 +47,15 @@ json_escape_string :: proc(builder: ^strings.Builder, s: string) {
 			i += width
 		}
 	}
+}
+
+// Join lines for an OBS text source.
+//
+// OBS's text sources — GDI+ and FreeType alike — have no line-height or
+// leading control, so a multi-line value renders with whatever the font
+// metrics give you, which is tight. The only lever we have is what we
+// send, so "roomy" puts a blank line between entries.
+obs_join_lines :: proc(lines: []string, allocator := context.temp_allocator) -> string {
+	sep := app.settings.obs_roomy_lines ? "\n\n" : "\n"
+	return strings.join(lines, sep, allocator)
 }

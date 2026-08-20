@@ -127,6 +127,7 @@ ID_PORT           :: "obs.port"
 ID_OVERLAY_MODE   :: "obs.overlay_mode"
 ID_OVERLAY_COUNT  :: "obs.overlay_count"
 ID_OVERLAY_REGION :: "obs.overlay_region"
+ID_ROOMY_LINES    :: "obs.roomy_lines"
 ID_OVERLAY_BG     :: "obs.overlay_bg"
 ID_SHOW_DEATHS    :: "obs.show_deaths"
 ID_TEXT_TOGGLE    :: "obs.text_enabled"
@@ -727,7 +728,15 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		))
 	}
 	append(&rows, paragraph(ctx,
-		"Unticked sources are never created in your scene. Unticking one already in OBS stops it updating but leaves it there — delete it in OBS if you don't want it.",
+		"Unticking hides the source in OBS rather than deleting it, so anything you've styled survives — re-tick to bring it back. ER Region and ER Region Bosses follow the Region setting under Browser source above.",
+		th.color.fg_muted, th.font.size_xs,
+	))
+	append(&rows, skald.checkbox(
+		ctx, app.settings.obs_roomy_lines, "Blank line between entries in multi-line sources",
+		on_roomy_lines, id = skald.hash_id(ID_ROOMY_LINES),
+	))
+	append(&rows, paragraph(ctx,
+		"OBS text sources have no line-height setting, so the only way to loosen up a list is to send the extra line. Applies to the region and next-boss lists, and to the text files.",
 		th.color.fg_muted, th.font.size_xs,
 	))
 	append(&rows, skald.spacer(th.spacing.xs))
@@ -985,6 +994,8 @@ on_overlay_region :: proc(label: string) -> Msg {
 on_obs_source_toggled :: proc(kind: Obs_Source, on: bool) -> Msg {
 	return Obs_Source_Toggled{kind = kind, on = on}
 }
+
+on_roomy_lines :: proc(v: bool) -> Msg { return Roomy_Lines_Set(v) }
 
 on_obs_text_set :: proc(v: bool) -> Msg { return Obs_Text_Set(v) }
 on_obs_text_dir :: proc(v: string) -> Msg { return Obs_Text_Dir_Draft(v) }

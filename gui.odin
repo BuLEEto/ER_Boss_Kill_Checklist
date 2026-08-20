@@ -128,6 +128,7 @@ Obs_Source_Toggled :: struct {
 Copy_Requested :: distinct string
 
 Obs_Text_Set :: distinct bool
+Roomy_Lines_Set :: distinct bool
 Obs_Text_Dir_Draft :: distinct string
 Obs_Text_Dir_Committed :: struct {}
 Obs_Text_Dir_Browse :: struct {}
@@ -181,6 +182,7 @@ Msg :: union {
 	Obs_Source_Toggled,
 	Copy_Requested,
 	Obs_Text_Set,
+	Roomy_Lines_Set,
 	Obs_Text_Dir_Draft,
 	Obs_Text_Dir_Committed,
 	Obs_Text_Dir_Browse,
@@ -455,12 +457,17 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		case .Region_Bosses: app.settings.obsws_send_region_bosses = v.on
 		}
 		app_save_settings()
-		// Newly-ticked sources don't exist in OBS yet, so re-run the
-		// setup rather than only pushing text at them.
-		if app.settings.obsws_enabled && v.on {
+
+		// Reconnect rather than patching the one source. Creating,
+		// showing and hiding all need a round trip for the scene item id,
+		// and the socket's replies belong to the reader thread once it's
+		// running — the setup pass is the one place round trips are safe,
+		// because it runs before the reader starts. On loopback a
+		// reconnect is imperceptible, and it reconciles every source at
+		// once rather than drifting one at a time.
+		if app.settings.obsws_enabled {
 			return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
 		}
-		obsws_push_update()
 
 	case Copy_Requested:
 		skald.clipboard_set(string(v))
@@ -477,6 +484,12 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 				out = gui_toast(out, "Text files written", .Success)
 			}
 		}
+
+	case Roomy_Lines_Set:
+		sync.guard(&app.mu)
+		app.settings.obs_roomy_lines = bool(v)
+		app_save_settings()
+		out = gui_after_data_change(out)
 
 	case Obs_Text_Dir_Draft:
 		delete(out.obs_text_dir_draft)

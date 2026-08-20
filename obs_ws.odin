@@ -418,9 +418,23 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn) {
 	LINE_HEIGHT :: f32(72)
 
 	for kind in Obs_Source {
-		if !obs_source_enabled(kind) do continue
 		name := obs_source_name(kind)
-		if name in existing do continue
+
+		// Unticked: hide it rather than delete it. The user may have
+		// styled and positioned it, and OBS has no undo for a deleted
+		// source — hiding takes it off the canvas, is one click to
+		// reverse, and re-ticking here brings it straight back.
+		if !obs_source_enabled(kind) {
+			if name in existing do obsws_show_source(conn, scene, name, false)
+			continue
+		}
+
+		if name in existing {
+			// Re-ticked, or just already there. Make sure it's visible
+			// again, but don't touch its position or styling.
+			obsws_show_source(conn, scene, name, true)
+			continue
+		}
 
 		b := strings.builder_make(context.temp_allocator)
 		strings.write_string(&b, `{"sceneName":"`)
@@ -493,10 +507,27 @@ obsws_input_names :: proc(conn: ^ws.Conn) -> map[string]bool {
 	return names
 }
 
-// Move a scene item to a position. Needs the item's id, which is per
-// scene rather than per source, so it takes a round trip to look up.
+// Show or hide a scene item without deleting it.
 @(private = "file")
-obsws_place_source :: proc(conn: ^ws.Conn, scene, name: string, x, y: f32) {
+obsws_show_source :: proc(conn: ^ws.Conn, scene, name: string, visible: bool) {
+	item_id, ok := obsws_scene_item_id(conn, scene, name)
+	if !ok do return
+
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, `{"sceneName":"`)
+	json_escape_string(&b, scene)
+	fmt.sbprintf(
+		&b,
+		`","sceneItemId":%d,"sceneItemEnabled":%s}}`,
+		item_id, visible ? "true" : "false",
+	)
+	obsws_request(conn, "SetSceneItemEnabled", strings.to_string(b))
+}
+
+// A scene item's id, which is per scene rather than per source, so it
+// takes a round trip to look up.
+@(private = "file")
+obsws_scene_item_id :: proc(conn: ^ws.Conn, scene, name: string) -> (i64, bool) {
 	q := strings.builder_make(context.temp_allocator)
 	strings.write_string(&q, `{"sceneName":"`)
 	json_escape_string(&q, scene)
@@ -505,10 +536,17 @@ obsws_place_source :: proc(conn: ^ws.Conn, scene, name: string, x, y: f32) {
 	strings.write_string(&q, `"}`)
 
 	d, ok := obsws_request_sync(conn, "GetSceneItemId", strings.to_string(q))
-	if !ok do return
+	if !ok do return 0, false
 
-	item_id := json_int(json_object(d, "responseData"), "sceneItemId")
-	if item_id <= 0 do return
+	id := json_int(json_object(d, "responseData"), "sceneItemId")
+	return id, id > 0
+}
+
+// Move a scene item to a position.
+@(private = "file")
+obsws_place_source :: proc(conn: ^ws.Conn, scene, name: string, x, y: f32) {
+	item_id, ok := obsws_scene_item_id(conn, scene, name)
+	if !ok do return
 
 	t := strings.builder_make(context.temp_allocator)
 	strings.write_string(&t, `{"sceneName":"`)
@@ -632,13 +670,12 @@ obsws_push_update :: proc() {
 		r_total, r_killed := count_region_bosses(r)
 		region_text = fmt.tprintf("%s (%d/%d)", r.region_name, r_killed, r_total)
 
-		b := strings.builder_make(context.temp_allocator)
+		names := make([dynamic]string, context.temp_allocator)
 		for &boss in r.bosses {
 			if boss.killed do continue
-			if strings.builder_len(b) > 0 do strings.write_byte(&b, '\n')
-			strings.write_string(&b, boss.boss)
+			append(&names, boss.boss)
 		}
-		region_bosses = strings.to_string(b)
+		region_bosses = obs_join_lines(names[:])
 	}
 
 	// Built per kind so the enum stays the single source of truth for

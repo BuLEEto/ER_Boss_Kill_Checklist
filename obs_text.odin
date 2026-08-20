@@ -78,12 +78,11 @@ obs_text_write_all :: proc() -> os.Error {
 		next_one = fmt.tprintf("%s — %s", next[0].boss, next[0].place)
 	}
 
-	next_many := strings.builder_make(context.temp_allocator)
-	for b, i in next {
-		if i > 0 do strings.write_byte(&next_many, '\n')
-		fmt.sbprintf(&next_many, "%s — %s", b.boss, b.place)
+	next_lines := make([dynamic]string, context.temp_allocator)
+	for b in next {
+		append(&next_lines, fmt.tprintf("%s — %s", b.boss, b.place))
 	}
-	if len(next) == 0 do strings.write_string(&next_many, "All bosses defeated")
+	next_many := len(next) > 0 ? obs_join_lines(next_lines[:]) : "All bosses defeated"
 
 	region := "All regions cleared"
 	region_bosses := "All regions cleared"
@@ -92,23 +91,22 @@ obs_text_write_all :: proc() -> os.Error {
 		r_total, r_killed := count_region_bosses(r)
 		region = fmt.tprintf("%s (%d/%d)", r.region_name, r_killed, r_total)
 
-		rb := strings.builder_make(context.temp_allocator)
+		rb := make([dynamic]string, context.temp_allocator)
 		for &boss in r.bosses {
 			if boss.killed do continue
-			if strings.builder_len(rb) > 0 do strings.write_byte(&rb, '\n')
-			strings.write_string(&rb, boss.boss)
+			append(&rb, boss.boss)
 		}
-		region_bosses = strings.to_string(rb)
+		region_bosses = obs_join_lines(rb[:])
 	}
 
 	// Every region, in order, the way the overlay's summary mode lists
 	// them — so a text source can show the same breakdown.
-	all_regions := strings.builder_make(context.temp_allocator)
-	for &r, i in app.regions {
+	region_lines := make([dynamic]string, context.temp_allocator)
+	for &r in app.regions {
 		r_total, r_killed := count_region_bosses(&r)
-		if i > 0 do strings.write_byte(&all_regions, '\n')
-		fmt.sbprintf(&all_regions, "%s %d/%d", r.region_name, r_killed, r_total)
+		append(&region_lines, fmt.tprintf("%s %d/%d", r.region_name, r_killed, r_total))
 	}
+	all_regions := obs_join_lines(region_lines[:])
 
 	contents := [?]string {
 		fmt.tprintf("%d / %d bosses", killed, total),
@@ -119,10 +117,10 @@ obs_text_write_all :: proc() -> os.Error {
 		fmt.tprintf("%d", app.death_count),
 		character,
 		next_one,
-		strings.to_string(next_many),
+		next_many,
 		region,
 		region_bosses,
-		strings.to_string(all_regions),
+		all_regions,
 	}
 
 	files := OBS_TEXT_FILES
