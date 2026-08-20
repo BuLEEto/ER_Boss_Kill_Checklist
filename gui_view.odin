@@ -577,11 +577,10 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 
 	// -- Browser source -----------------------------------------------------
 	append(&rows, skald.section_header(ctx, "Browser source"))
-	append(&rows, paragraph(ctx,
+	append(&rows, help_row(ctx,
 		"The original route, and the best-looking one: OBS renders the overlay page directly.",
-		th.color.fg_muted, th.font.size_sm,
+		.Browser_Source,
 	))
-	append(&rows, help_button(ctx, .Browser_Source))
 
 	append(&rows, skald.row(
 		skald.toggle(ctx, app.settings.server_enabled, "Run the web server", on_server_set,
@@ -652,11 +651,10 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	// -- Text files ---------------------------------------------------------
 	append(&rows, skald.spacer(th.spacing.sm))
 	append(&rows, skald.section_header(ctx, "Text files"))
-	append(&rows, paragraph(ctx,
+	append(&rows, help_row(ctx,
 		"Writes plain text files you point OBS \"Text (GDI+/FreeType)\" sources at with \"Read from file\". No browser source, no CPU cost, works on any OBS version.",
-		th.color.fg_muted, th.font.size_sm,
+		.Text_Files,
 	))
-	append(&rows, help_button(ctx, .Text_Files))
 	append(&rows, skald.toggle(
 		ctx, app.settings.obs_text_enabled, "Write text files", on_obs_text_set,
 		id = skald.hash_id(ID_TEXT_TOGGLE),
@@ -676,11 +674,10 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	// -- obs-websocket ------------------------------------------------------
 	append(&rows, skald.spacer(th.spacing.sm))
 	append(&rows, skald.section_header(ctx, "obs-websocket"))
-	append(&rows, paragraph(ctx,
+	append(&rows, help_row(ctx,
 		"The way most OBS integrations work. Connects to OBS directly and pushes progress into text sources — enable the WebSocket server in OBS under Tools → WebSocket Server Settings.",
-		th.color.fg_muted, th.font.size_sm,
+		.Obs_Websocket,
 	))
-	append(&rows, help_button(ctx, .Obs_Websocket))
 	append(&rows, skald.toggle(ctx, app.settings.obsws_enabled, "Connect to OBS", on_obsws_set,
 		id = skald.hash_id(ID_WS_TOGGLE)))
 	append(&rows, skald.row(

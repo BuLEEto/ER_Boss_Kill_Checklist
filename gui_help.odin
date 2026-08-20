@@ -238,9 +238,45 @@ view_help_dialog :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	)
 }
 
-// A small "?" next to a section header, to open that section's sheet.
-help_button :: proc(ctx: ^skald.Ctx(Msg), topic: Help_Topic) -> skald.View {
-	return skald.button(ctx, "?  How do I use this", Msg(Help_Opened(topic)))
+HELP_BUTTON_LABEL :: "How do I use this?"
+
+// A section's blurb with its help button on the same line.
+//
+// The button used to be its own row. Inside the tab body's column — which
+// stretches its children so form rows and text inputs fill the width —
+// that made a button as wide as the window for a two-word action. Pairing
+// it with the text keeps it at its natural size and puts it where the
+// question actually occurs to you.
+help_row :: proc(ctx: ^skald.Ctx(Msg), blurb: string, topic: Help_Topic) -> skald.View {
+	th := ctx.theme
+
+	// Reserve the button's share before wrapping the blurb, otherwise the
+	// text claims the full width and shoulders the button off the edge.
+	// Estimated from the label rather than hardcoded so it still holds at
+	// every Text size setting.
+	button_w := f32(len(HELP_BUTTON_LABEL)) * th.font.size_md * 0.55 + th.spacing.lg * 2
+	text_w := content_width(ctx) - button_w - th.spacing.md
+	if text_w < 160 do text_w = 160
+
+	// A wrapped text view measures to its max_width, not to its longest
+	// line, so handing one a width always parks the button at the far
+	// right. Ask the renderer whether the blurb fits on one line first:
+	// if it does, leave it unwrapped so it measures to its actual width
+	// and the button follows the sentence. Only a blurb that genuinely
+	// needs to wrap gets a width — and that one fills the row anyway.
+	blurb_view: skald.View
+	if skald.text_fits(ctx.renderer, blurb, text_w, th.font.size_sm) {
+		blurb_view = skald.text(blurb, th.color.fg_muted, th.font.size_sm)
+	} else {
+		blurb_view = paragraph(ctx, blurb, th.color.fg_muted, th.font.size_sm, text_w)
+	}
+
+	return skald.row(
+		blurb_view,
+		skald.button(ctx, HELP_BUTTON_LABEL, Msg(Help_Opened(topic))),
+		spacing     = th.spacing.md,
+		cross_align = .End,
+	)
 }
 
 on_help_closed :: proc() -> Msg { return Help_Closed{} }
