@@ -64,6 +64,24 @@ Conn :: struct {
 	// Bytes read from the socket but not yet consumed by a frame.
 	rx:        [dynamic]u8,
 	allocator: mem.Allocator,
+
+	// When set, a receive timeout means "nothing has arrived yet, keep
+	// waiting" instead of "the connection died". A long-lived reader on a
+	// quiet protocol needs that: obs-websocket sends nothing at all when
+	// the client subscribes to no events, so every socket timeout would
+	// otherwise look like a disconnect.
+	//
+	// The handshake deliberately runs with it off — a server that accepts
+	// the TCP connection and then says nothing should fail fast rather
+	// than hang the caller forever.
+	idle_ok: bool, // atomic
+}
+
+// Call once the connection is established and a dedicated reader is about
+// to park on it. See Conn.idle_ok.
+set_idle_tolerant :: proc(c: ^Conn, on: bool) {
+	if c == nil do return
+	sync.atomic_store(&c.idle_ok, on)
 }
 
 Message :: struct {
@@ -398,14 +416,34 @@ want :: proc(c: ^Conn, n: int) -> bool {
 	return true
 }
 
+// Pulls whatever is available into the read buffer. Returns false only
+// when the connection is genuinely finished — callers loop until they
+// have the bytes they need, so "true with nothing added" is a valid
+// "still waiting".
 @(private)
 fill :: proc(c: ^Conn) -> bool {
 	chunk: [8192]u8
 	n, err := net.recv_tcp(c.socket, chunk[:])
-	if err != nil || n <= 0 {
+
+	if err != nil {
+		#partial switch err {
+		case .Timeout, .Would_Block, .Interrupted:
+			// Nothing arrived inside the socket timeout, or the read was
+			// cut short by a signal. Neither says anything about whether
+			// the peer is still there.
+			if sync.atomic_load(&c.idle_ok) do return true
+		}
 		c.connected = false
 		return false
 	}
+
+	// A zero-length read with no error is a graceful close (see
+	// core:net's note on TCP_Recv_Error.Connection_Closed).
+	if n <= 0 {
+		c.connected = false
+		return false
+	}
+
 	append(&c.rx, ..chunk[:n])
 	return true
 }

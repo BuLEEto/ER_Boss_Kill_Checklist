@@ -122,12 +122,16 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 				"Host stays 127.0.0.1 if OBS is on this machine. Tick Remember the password to skip re-typing it next time — it's encrypted before it's written to disk.",
 			},
 			Help_Step{
-				"Four sources appear in your current scene",
-				"ER Progress, ER Next Boss, ER Deaths and ER Character. They're created with a bold white font and a dark outline so they're readable straight away.",
+				"Six sources appear in your current scene",
+				"ER Progress, ER Next Boss, ER Deaths, ER Character, ER Region and ER Region Bosses. They're created with a bold white font and a dark outline, stacked down the left, so they're readable and not piled on top of each other.",
+			},
+			Help_Step{
+				"Delete any you don't want",
+				"ER Region shows the first unfinished area and its count (\"Caelid (12/15)\"); ER Region Bosses lists what's left in it, one per line — the same breakdown the overlay's Region mode gives you.",
 			},
 			Help_Step{
 				"Style and place them however you like",
-				"They're ordinary OBS text sources. Change the font, colour, size, position — the app only ever updates their text, and never touches a source that already exists.",
+				"They're ordinary OBS text sources. Change the font, colour, size, position — the app only ever updates their text. A source that already exists is never created, moved or restyled, so anything you've set up stays put.",
 			},
 		)
 

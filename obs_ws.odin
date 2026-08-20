@@ -37,14 +37,27 @@ import ws "src/libs/websocket"
 // Text sources the app creates and keeps updated, in the same order as
 // the values built in obsws_push_update:
 //
-//   ER Progress    "113 / 207 bosses"
-//   ER Next Boss   the next boss still standing, with its location
-//   ER Deaths      death count
-//   ER Character   character name and level
+//   ER Progress       "113 / 207 bosses"
+//   ER Next Boss      the next boss still standing, with its location
+//   ER Deaths         "Deaths: 57"
+//   ER Character      character name and level
+//   ER Region         the first unfinished area and its count
+//   ER Region Bosses  what is left in that area, one per line
+//
+// Values carry their own label where a bare number would be meaningless
+// on its own — an OBS text source is a standalone thing on screen, not a
+// cell next to a heading.
 //
 // The "ER " prefix keeps them recognisable in OBS's source list and out
 // of the way of the user's own names.
-OBS_SOURCES :: [?]string{"ER Progress", "ER Next Boss", "ER Deaths", "ER Character"}
+OBS_SOURCES :: [?]string{
+	"ER Progress",
+	"ER Next Boss",
+	"ER Deaths",
+	"ER Character",
+	"ER Region",
+	"ER Region Bosses",
+}
 
 Obsws_State :: enum {
 	Disconnected,
@@ -154,6 +167,12 @@ obsws_connect_worker :: proc(p: Obsws_Connect_Params) -> Msg {
 	// sources exist. Failure here is not fatal — the connection is still
 	// usable, the user just has to create sources by hand.
 	obsws_prepare_sources(conn)
+
+	// From here the reader parks on a socket that will be silent for
+	// minutes at a time, so socket timeouts stop meaning "disconnected".
+	// Switched on only now: the handshake and the setup round-trips above
+	// all want a timeout to fail rather than hang.
+	ws.set_idle_tolerant(conn, true)
 
 	sync.mutex_lock(&g_obs.mu)
 	g_obs.reader = thread.create_and_start_with_data(conn, obsws_reader_proc)
@@ -320,8 +339,8 @@ obsws_auth :: proc(
 // we send is idempotent, and a stream overlay is not worth blocking the
 // caller for a round trip.
 @(private = "file")
-obsws_request :: proc(conn: ^ws.Conn, request_type: string, request_data: string) -> bool {
-	if conn == nil do return false
+obsws_request :: proc(conn: ^ws.Conn, request_type: string, request_data: string) -> (int, bool) {
+	if conn == nil do return 0, false
 
 	sync.mutex_lock(&g_obs.mu)
 	g_obs.next_id += 1
@@ -335,7 +354,7 @@ obsws_request :: proc(conn: ^ws.Conn, request_type: string, request_data: string
 	}
 	strings.write_string(&b, "}}")
 
-	return ws.send_text(conn, strings.to_string(b)) == .None
+	return id, ws.send_text(conn, strings.to_string(b)) == .None
 }
 
 // Ask OBS what scene we're on and which text plugin this platform has,
@@ -354,13 +373,23 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn) {
 
 	if len(scene) == 0 || len(kind) == 0 do return
 
+	// Ask what already exists before creating anything. Relying on
+	// CreateInput failing for a duplicate was enough while all we did was
+	// create — but now that new sources also get positioned, we have to
+	// know which ones are ours to move. A source the user has already
+	// placed and styled must be left exactly where it is.
+	existing := obsws_input_names(conn)
+
+	// Newly-created sources are stacked down the left rather than all
+	// landing on top of each other at the origin, which is what OBS does
+	// with four sources created back to back.
+	y := f32(48)
+	LINE_HEIGHT :: f32(72)
+
 	sources := OBS_SOURCES
 	for name in sources {
-		// CreateInput fails harmlessly when the source already exists,
-		// which saves a GetInputList round trip — and, importantly, means
-		// we never overwrite the styling of a source the user has already
-		// set up. New sources get the defaults below; existing ones are
-		// left exactly as they are.
+		if name in existing do continue
+
 		b := strings.builder_make(context.temp_allocator)
 		strings.write_string(&b, `{"sceneName":"`)
 		json_escape_string(&b, scene)
@@ -372,6 +401,9 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn) {
 		strings.write_string(&b, obsws_default_text_settings(kind))
 		strings.write_string(&b, `,"sceneItemEnabled":true}`)
 		obsws_request(conn, "CreateInput", strings.to_string(b))
+
+		obsws_place_source(conn, scene, name, 48, y)
+		y += LINE_HEIGHT
 	}
 }
 
@@ -404,6 +436,59 @@ obsws_default_text_settings :: proc(kind: string) -> string {
 	)
 }
 
+// Names of every input OBS currently knows about.
+@(private = "file")
+obsws_input_names :: proc(conn: ^ws.Conn) -> map[string]bool {
+	names := make(map[string]bool, 16, context.temp_allocator)
+
+	d, ok := obsws_request_sync(conn, "GetInputList")
+	if !ok do return names
+
+	data := json_object(d, "responseData")
+	obj, is_obj := data.(json.Object)
+	if !is_obj do return names
+
+	list, has := obj["inputs"]
+	if !has do return names
+	arr, is_arr := list.(json.Array)
+	if !is_arr do return names
+
+	for entry in arr {
+		if n := json_string(entry, "inputName"); len(n) > 0 {
+			names[n] = true
+		}
+	}
+	return names
+}
+
+// Move a scene item to a position. Needs the item's id, which is per
+// scene rather than per source, so it takes a round trip to look up.
+@(private = "file")
+obsws_place_source :: proc(conn: ^ws.Conn, scene, name: string, x, y: f32) {
+	q := strings.builder_make(context.temp_allocator)
+	strings.write_string(&q, `{"sceneName":"`)
+	json_escape_string(&q, scene)
+	strings.write_string(&q, `","sourceName":"`)
+	json_escape_string(&q, name)
+	strings.write_string(&q, `"}`)
+
+	d, ok := obsws_request_sync(conn, "GetSceneItemId", strings.to_string(q))
+	if !ok do return
+
+	item_id := json_int(json_object(d, "responseData"), "sceneItemId")
+	if item_id <= 0 do return
+
+	t := strings.builder_make(context.temp_allocator)
+	strings.write_string(&t, `{"sceneName":"`)
+	json_escape_string(&t, scene)
+	fmt.sbprintf(
+		&t,
+		`","sceneItemId":%d,"sceneItemTransform":{{"positionX":%.1f,"positionY":%.1f}}}}`,
+		item_id, x, y,
+	)
+	obsws_request(conn, "SetSceneItemTransform", strings.to_string(t))
+}
+
 // Round-trip helper for the two setup queries. Unlike the fire-and-
 // forget path this waits for the reply, which is fine because it only
 // runs on the connect worker before the reader thread starts.
@@ -411,22 +496,33 @@ obsws_default_text_settings :: proc(kind: string) -> string {
 obsws_request_sync :: proc(
 	conn: ^ws.Conn,
 	request_type: string,
+	request_data := "",
 	allocator := context.temp_allocator,
 ) -> (
 	json.Value,
 	bool,
 ) {
-	if !obsws_request(conn, request_type, "") do return nil, false
+	id, sent := obsws_request(conn, request_type, request_data)
+	if !sent do return nil, false
 
-	// Skip anything that isn't a RequestResponse (op 7).
-	for _ in 0 ..< 8 {
+	// Match on requestId, not just "the next op 7 that turns up".
+	// Fire-and-forget requests (CreateInput) leave their own responses
+	// queued on the socket, so taking the first RequestResponse handed
+	// back the wrong one — which read as a missing sceneItemId and
+	// silently skipped positioning every other source.
+	expected := fmt.tprintf("%d", id)
+
+	for _ in 0 ..< 32 {
 		reply, err := ws.receive(conn, allocator)
 		if err != .None do return nil, false
 
 		root, parse_err := json.parse(reply.payload, allocator = allocator)
 		if parse_err != .None do continue
 		if json_int(root, "op") != 7 do continue
-		return json_object(root, "d"), true
+
+		d := json_object(root, "d")
+		if json_string(d, "requestId") != expected do continue
+		return d, true
 	}
 	return nil, false
 }
@@ -497,11 +593,29 @@ obsws_push_update :: proc() {
 
 	character := len(name) > 0 ? fmt.tprintf("%s — RL %d", name, level) : "No character"
 
+	region_text := "All regions cleared"
+	region_bosses := "All regions cleared"
+	if idx := app_first_incomplete_region(); idx >= 0 {
+		r := &app.regions[idx]
+		r_total, r_killed := count_region_bosses(r)
+		region_text = fmt.tprintf("%s (%d/%d)", r.region_name, r_killed, r_total)
+
+		b := strings.builder_make(context.temp_allocator)
+		for &boss in r.bosses {
+			if boss.killed do continue
+			if strings.builder_len(b) > 0 do strings.write_byte(&b, '\n')
+			strings.write_string(&b, boss.boss)
+		}
+		region_bosses = strings.to_string(b)
+	}
+
 	values := [?]string {
 		fmt.tprintf("%d / %d bosses", killed, total),
 		next_text,
-		fmt.tprintf("%d", app.death_count),
+		fmt.tprintf("Deaths: %d", app.death_count),
 		character,
+		region_text,
+		region_bosses,
 	}
 
 	sources := OBS_SOURCES

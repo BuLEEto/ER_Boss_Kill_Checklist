@@ -32,6 +32,8 @@ OBS_TEXT_FILES :: [?]Obs_Text_File {
 	{"next_boss.txt",    "the next boss still standing"},
 	{"next_bosses.txt",  "the next few bosses, one per line"},
 	{"region.txt",       "first unfinished region and its count"},
+	{"region_bosses.txt","what's left in that region, one per line"},
+	{"regions.txt",      "every region and its count, one per line"},
 }
 
 // Where files go when the user hasn't chosen a folder: an `obs` folder
@@ -84,9 +86,28 @@ obs_text_write_all :: proc() -> os.Error {
 	if len(next) == 0 do strings.write_string(&next_many, "All bosses defeated")
 
 	region := "All regions cleared"
+	region_bosses := "All regions cleared"
 	if idx := app_first_incomplete_region(); idx >= 0 {
-		r_total, r_killed := count_region_bosses(&app.regions[idx])
-		region = fmt.tprintf("%s (%d/%d)", app.regions[idx].region_name, r_killed, r_total)
+		r := &app.regions[idx]
+		r_total, r_killed := count_region_bosses(r)
+		region = fmt.tprintf("%s (%d/%d)", r.region_name, r_killed, r_total)
+
+		rb := strings.builder_make(context.temp_allocator)
+		for &boss in r.bosses {
+			if boss.killed do continue
+			if strings.builder_len(rb) > 0 do strings.write_byte(&rb, '\n')
+			strings.write_string(&rb, boss.boss)
+		}
+		region_bosses = strings.to_string(rb)
+	}
+
+	// Every region, in order, the way the overlay's summary mode lists
+	// them — so a text source can show the same breakdown.
+	all_regions := strings.builder_make(context.temp_allocator)
+	for &r, i in app.regions {
+		r_total, r_killed := count_region_bosses(&r)
+		if i > 0 do strings.write_byte(&all_regions, '\n')
+		fmt.sbprintf(&all_regions, "%s %d/%d", r.region_name, r_killed, r_total)
 	}
 
 	contents := [?]string {
@@ -100,6 +121,8 @@ obs_text_write_all :: proc() -> os.Error {
 		next_one,
 		strings.to_string(next_many),
 		region,
+		region_bosses,
+		strings.to_string(all_regions),
 	}
 
 	files := OBS_TEXT_FILES

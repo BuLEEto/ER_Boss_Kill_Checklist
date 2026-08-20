@@ -126,16 +126,22 @@ works on every OBS version:
 | `next_boss.txt` | the next boss still standing |
 | `next_bosses.txt` | the next few, one per line |
 | `region.txt` | first unfinished region and its count |
+| `region_bosses.txt` | what's left in that region, one per line |
+| `regions.txt` | every region and its count, one per line |
 
 ### obs-websocket
 
 Enable OBS's own WebSocket server (**Tools → WebSocket Server Settings**), then
 enter the host, port and password on the OBS tab and hit **Connect**. The app
-creates four text sources in your current scene — `ER Progress`, `ER Next Boss`,
-`ER Deaths`, `ER Character` — with a bold white font and a dark outline so
-they're legible over gameplay straight away. Restyle and position them in OBS
-however you like: the app only ever changes their text, and never touches a
-source that already exists.
+creates six text sources in your current scene — `ER Progress`, `ER Next Boss`,
+`ER Deaths`, `ER Character`, `ER Region` and `ER Region Bosses` — with a bold
+white font and a dark outline, stacked down the left so they don't land on top
+of each other. `ER Region` and `ER Region Bosses` give you the same per-area
+breakdown as the overlay's Region mode.
+
+Restyle and position them in OBS however you like: the app only ever changes
+their text, and a source that already exists is never created, moved or
+restyled.
 
 The password is only written to `settings.json` if you tick *Remember the
 password*, and it's encrypted first — AES-256-GCM under a key derived from a
