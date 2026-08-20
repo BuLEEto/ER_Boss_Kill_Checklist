@@ -31,7 +31,7 @@ OBS_TEXT_FILES :: [?]Obs_Text_File {
 	{"character.txt",    "\"Tarnished — RL 150\""},
 	{"next_boss.txt",    "the next boss still standing"},
 	{"next_bosses.txt",  "the next few bosses, one per line"},
-	{"region.txt",       "first unfinished region and its count"},
+	{"region.txt",       "the focused region and its count"},
 	{"region_bosses.txt","what's left in that region, one per line"},
 	{"regions.txt",      "every region and its count, one per line"},
 }

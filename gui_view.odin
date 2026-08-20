@@ -130,6 +130,7 @@ ID_OVERLAY_REGION :: "obs.overlay_region"
 ID_ROOMY_LINES    :: "obs.roomy_lines"
 ID_OVERLAY_ALIGN  :: "obs.overlay_align"
 ID_SOURCE_STYLE   :: "obs.source_style"
+ID_OBS_TAB        :: "obs.subtab"
 ID_THEME_ACCENT   :: "obs.theme_accent"
 ID_THEME_TEXT     :: "obs.theme_text"
 ID_THEME_SIZE     :: "obs.theme_size"
@@ -581,14 +582,45 @@ view_region :: proc(
 
 view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	th := ctx.theme
-	rows := make([dynamic]skald.View, context.temp_allocator)
 
+	labels := OBS_TAB_LABELS
+	panel: skald.View
+	switch s.obs_tab {
+	case .Browser:   panel = view_obs_browser(s, ctx)
+	case .Text:      panel = view_obs_text(s, ctx)
+	case .Websocket: panel = view_obs_websocket(s, ctx)
+	}
+
+	// A segmented control rather than another tab strip: nesting tabs
+	// inside tabs reads as one confused row of six, where this reads as a
+	// choice within the OBS tab.
+	return skald.col(
+		skald.segmented(
+			ctx, labels[:], int(s.obs_tab), on_obs_tab, id = skald.hash_id(ID_OBS_TAB),
+		),
+		skald.spacer(th.spacing.sm),
+		skald.flex(1, panel),
+		spacing     = 0,
+		cross_align = .Stretch,
+	)
+}
+
+// ---------------------------------------------------------------------------
+// Browser source
+//
+// The overlay page, plus everything about how it looks. Appearance lives
+// here rather than in its own panel because this is the integration it
+// most obviously belongs to — with a note for the case where it also
+// applies, which is the web-style obs-websocket sources.
+// ---------------------------------------------------------------------------
+
+view_obs_browser :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
+	th := ctx.theme
+	rows := make([dynamic]skald.View, context.temp_allocator)
 	running := server_is_running(&app.server)
 
-	// -- Browser source -----------------------------------------------------
-	append(&rows, skald.section_header(ctx, "Browser source"))
 	append(&rows, help_row(ctx,
-		"The original route, and the best-looking one: OBS renders the overlay page directly.",
+		"OBS renders the overlay page directly. The best-looking option, and the only one where alignment and spacing work properly.",
 		.Browser_Source,
 	))
 
@@ -611,84 +643,116 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 			fmt.tprintf("Listening on port %d", app.server.port), th.color.success, th.font.size_sm,
 		))
 	} else {
-		append(&rows, skald.text("Server stopped", th.color.fg_muted, th.font.size_sm))
+		// The settings below stay visible with the server off. Hiding
+		// them meant a control could vanish mid-edit, and they're still
+		// worth setting — the mobile page and the text files read some of
+		// the same values.
+		append(&rows, skald.text(
+			"Server stopped — the overlay and mobile pages won't load until it's running.",
+			th.color.fg_muted, th.font.size_sm,
+		))
 	}
 
-	if running {
-		append(&rows, skald.form_row(ctx, "Overlay",
-			skald.segmented(
-				ctx, {"Summary", "Next up", "Region"},
-				overlay_mode_index(app.settings.overlay_mode), on_overlay_mode,
-				id = skald.hash_id(ID_OVERLAY_MODE),
-			),
-			label_width = 120,
-		))
-
-		append(&rows, skald.form_row(ctx, "Region",
-			skald.select(
-				ctx, region_choice_label(), region_choice_labels(),
-				on_overlay_region, width = 280, id = skald.hash_id(ID_OVERLAY_REGION),
-			),
-			label_width = 120,
-		))
-		append(&rows, paragraph(ctx, region_choice_hint(), th.color.fg_muted, th.font.size_xs))
-
-		if app.settings.overlay_mode == "next" {
-			append(&rows, skald.form_row(ctx,
-				fmt.tprintf("Show %d bosses", app.settings.overlay_next_count),
-				skald.slider(
-					ctx, f32(app.settings.overlay_next_count), on_overlay_count,
-					min_value = 1, max_value = 25, step = 1, width = 220,
-					id = skald.hash_id(ID_OVERLAY_COUNT),
-				),
-				label_width = 120,
-			))
-		}
-
-		append(&rows, skald.form_row(ctx, "Align",
-			skald.segmented(
-				ctx, {"Left", "Centre", "Right"},
-				overlay_align_index(app.settings.overlay_align), on_overlay_align,
-				id = skald.hash_id(ID_OVERLAY_ALIGN),
-			),
-			label_width = 120,
-		))
-		append(&rows, paragraph(ctx,
-			"Right-aligns every line, which OBS's own text sources can't do at all — park the source against the right of your canvas and lists grow leftwards instead of out of frame.",
-			th.color.fg_muted, th.font.size_xs,
-		))
-
-		append(&rows, skald.form_row(ctx, "Background",
-			skald.segmented(
-				ctx, {"Transparent", "Green", "Magenta"},
-				overlay_bg_index(app.settings.overlay_bg), on_overlay_bg,
-				id = skald.hash_id(ID_OVERLAY_BG),
-			),
-			label_width = 120,
-		))
-		append(&rows, paragraph(ctx,
-			"Transparent works with a Browser Source. Use a chroma key colour only if you're capturing a window instead.",
-			th.color.fg_muted, th.font.size_xs,
-		))
-		append(&rows, skald.checkbox(
-			ctx, app.settings.show_deaths, "Include death count", on_show_deaths,
-			id = skald.hash_id(ID_SHOW_DEATHS),
-		))
-
-		overlay_url := overlay_url_string(context.temp_allocator)
-		append(&rows, view_copy_row(ctx, "Overlay URL", overlay_url))
-		append(&rows, view_copy_row(ctx, "Mobile view", mobile_url_string(context.temp_allocator)))
-	}
-
-	// -- Appearance ---------------------------------------------------------
 	append(&rows, skald.spacer(th.spacing.sm))
+	append(&rows, skald.section_header(ctx, "What it shows"))
+
+	append(&rows, skald.form_row(ctx, "Overlay",
+		skald.segmented(
+			ctx, {"Summary", "Next up", "Region"},
+			overlay_mode_index(app.settings.overlay_mode), on_overlay_mode,
+			id = skald.hash_id(ID_OVERLAY_MODE),
+		),
+		label_width = 120,
+	))
+
+	if app.settings.overlay_mode == "next" {
+		append(&rows, skald.form_row(ctx,
+			fmt.tprintf("Show %d bosses", app.settings.overlay_next_count),
+			skald.slider(
+				ctx, f32(app.settings.overlay_next_count), on_overlay_count,
+				min_value = 1, max_value = 25, step = 1, width = 220,
+				id = skald.hash_id(ID_OVERLAY_COUNT),
+			),
+			label_width = 120,
+		))
+	}
+
+	append(&rows, skald.form_row(ctx, "Region",
+		skald.select(
+			ctx, region_choice_label(), region_choice_labels(),
+			on_overlay_region, width = 280, id = skald.hash_id(ID_OVERLAY_REGION),
+		),
+		label_width = 120,
+	))
+	append(&rows, paragraph(ctx, region_choice_hint(), th.color.fg_muted, th.font.size_xs))
+	append(&rows, paragraph(ctx,
+		"Region is shared: the text files and the ER Region sources follow it too.",
+		th.color.fg_muted, th.font.size_xs,
+	))
+
+	append(&rows, skald.checkbox(
+		ctx, app.settings.show_deaths, "Include death count", on_show_deaths,
+		id = skald.hash_id(ID_SHOW_DEATHS),
+	))
+
+	append(&rows, skald.spacer(th.spacing.sm))
+	append(&rows, skald.section_header(ctx, "How it looks"))
+
+	append(&rows, skald.form_row(ctx, "Align",
+		skald.segmented(
+			ctx, {"Left", "Centre", "Right"},
+			overlay_align_index(app.settings.overlay_align), on_overlay_align,
+			id = skald.hash_id(ID_OVERLAY_ALIGN),
+		),
+		label_width = 120,
+	))
+	append(&rows, paragraph(ctx,
+		"Aligns every line, which OBS's own text sources can't do at all — park the source against the right of your canvas and lists grow leftwards instead of out of frame.",
+		th.color.fg_muted, th.font.size_xs,
+	))
+
+	append(&rows, skald.form_row(ctx, "Background",
+		skald.segmented(
+			ctx, {"Transparent", "Green", "Magenta"},
+			overlay_bg_index(app.settings.overlay_bg), on_overlay_bg,
+			id = skald.hash_id(ID_OVERLAY_BG),
+		),
+		label_width = 120,
+	))
+	append(&rows, paragraph(ctx,
+		"Transparent works with a Browser Source. Use a chroma key colour only if you're capturing a window instead.",
+		th.color.fg_muted, th.font.size_xs,
+	))
+
 	for v in view_overlay_theme(s, ctx) do append(&rows, v)
 
-	// -- Text files ---------------------------------------------------------
 	append(&rows, skald.spacer(th.spacing.sm))
-	append(&rows, skald.section_header(ctx, "Text files"))
+	append(&rows, skald.section_header(ctx, "Add to OBS"))
+	append(&rows, paragraph(ctx,
+		"Sources → + → Browser, then paste this into the URL field.",
+		th.color.fg_muted, th.font.size_xs,
+	))
+	append(&rows, view_copy_row(ctx, "Overlay URL", overlay_url_string(context.temp_allocator)))
+	append(&rows, view_copy_row(ctx, "Mobile view", mobile_url_string(context.temp_allocator)))
+
+	return skald.scroll(ctx, {0, 0}, skald.col(
+		..rows[:],
+		spacing     = th.spacing.sm,
+		padding     = SCROLL_GUTTER,
+		cross_align = .Stretch,
+	))
+}
+
+// ---------------------------------------------------------------------------
+// Text files
+// ---------------------------------------------------------------------------
+
+view_obs_text :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
+	th := ctx.theme
+	rows := make([dynamic]skald.View, context.temp_allocator)
+
 	append(&rows, help_row(ctx,
-		"Writes plain text files you point OBS \"Text (GDI+/FreeType)\" sources at with \"Read from file\". No browser source, no CPU cost, works on any OBS version.",
+		"Plain text files you point OBS \"Text (GDI+/FreeType)\" sources at with \"Read from file\". No browser source, no CPU cost, works on any OBS version.",
 		.Text_Files,
 	))
 	append(&rows, skald.toggle(
@@ -707,11 +771,52 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		cross_align = .Center,
 	))
 
-	// -- obs-websocket ------------------------------------------------------
 	append(&rows, skald.spacer(th.spacing.sm))
-	append(&rows, skald.section_header(ctx, "obs-websocket"))
+	append(&rows, skald.checkbox(
+		ctx, app.settings.obs_roomy_lines, "Blank line between entries in the multi-line files",
+		on_roomy_lines, id = skald.hash_id(ID_ROOMY_LINES),
+	))
+	append(&rows, paragraph(ctx,
+		"OBS text sources have no line-height setting, so the only way to loosen a list up is to send the extra line. Also applies to the multi-line obs-websocket sources.",
+		th.color.fg_muted, th.font.size_xs,
+	))
+
+	append(&rows, skald.spacer(th.spacing.sm))
+	append(&rows, skald.section_header(ctx, "The files"))
+	files := OBS_TEXT_FILES
+	for f in files {
+		append(&rows, skald.row(
+			skald.text(f.name, th.color.fg, th.font.size_sm),
+			skald.flex(1, skald.spacer(0)),
+			skald.text(f.description, th.color.fg_muted, th.font.size_xs),
+			spacing     = th.spacing.sm,
+			padding     = 2,
+			cross_align = .Center,
+		))
+	}
+	append(&rows, paragraph(ctx,
+		"region.txt and region_bosses.txt follow the Region setting on the Browser source tab.",
+		th.color.fg_muted, th.font.size_xs,
+	))
+
+	return skald.scroll(ctx, {0, 0}, skald.col(
+		..rows[:],
+		spacing     = th.spacing.sm,
+		padding     = SCROLL_GUTTER,
+		cross_align = .Stretch,
+	))
+}
+
+// ---------------------------------------------------------------------------
+// obs-websocket
+// ---------------------------------------------------------------------------
+
+view_obs_websocket :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
+	th := ctx.theme
+	rows := make([dynamic]skald.View, context.temp_allocator)
+
 	append(&rows, help_row(ctx,
-		"The way most OBS integrations work. Connects to OBS directly and pushes progress into text sources — enable the WebSocket server in OBS under Tools → WebSocket Server Settings.",
+		"Connects to OBS directly and creates the sources for you — enable the WebSocket server in OBS under Tools → WebSocket Server Settings.",
 		.Obs_Websocket,
 	))
 	append(&rows, skald.toggle(ctx, app.settings.obsws_enabled, "Connect to OBS", on_obsws_set,
@@ -740,8 +845,18 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		on_obsws_remember, id = skald.hash_id(ID_WS_REMEMBER),
 	))
 
-	append(&rows, skald.spacer(th.spacing.xs))
-	append(&rows, skald.form_row(ctx, "Source style",
+	status, state := obsws_status_text()
+	status_colour := th.color.fg_muted
+	switch state {
+	case .Connected: status_colour = th.color.success
+	case .Failed:    status_colour = th.color.danger
+	case .Connecting, .Disconnected: // muted
+	}
+	append(&rows, skald.text(status, status_colour, th.font.size_sm))
+
+	append(&rows, skald.spacer(th.spacing.sm))
+	append(&rows, skald.section_header(ctx, "Sources"))
+	append(&rows, skald.form_row(ctx, "Style",
 		skald.segmented(
 			ctx, {"Text", "Web"},
 			app.settings.obsws_source_style == "web" ? 1 : 0, on_obs_source_style,
@@ -751,12 +866,12 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	))
 	append(&rows, paragraph(ctx,
 		app.settings.obsws_source_style == "web" \
-			? "Each value is its own small browser source, so alignment, line height and colours are real CSS — restyle any of them with Custom CSS in its properties, or change align= in its URL. Costs a browser instance per source." \
+			? "Each value is its own small browser source, so alignment, line height and colours are real CSS — set on the Browser source tab, or per source with Custom CSS in OBS. Costs a browser instance per source." \
 			: "OBS text sources: cheap, no browser instance, but OBS gives them no alignment and no line height. Switch to Web if you want lists that align.",
 		th.color.fg_muted, th.font.size_xs,
 	))
+
 	append(&rows, skald.spacer(th.spacing.xs))
-	append(&rows, skald.text("Send to OBS", th.color.fg, th.font.size_sm))
 	for kind in Obs_Source {
 		append(&rows, skald.checkbox(
 			ctx, obs_source_enabled(kind), obs_source_label(kind),
@@ -765,27 +880,9 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		))
 	}
 	append(&rows, paragraph(ctx,
-		"Unticking hides the source in OBS rather than deleting it, so anything you've styled survives — re-tick to bring it back. ER Region and ER Region Bosses follow the Region setting under Browser source above.",
+		"Unticking hides the source in OBS rather than deleting it, so anything you've styled survives — re-tick to bring it back. ER Region and ER Region Bosses follow the Region setting on the Browser source tab.",
 		th.color.fg_muted, th.font.size_xs,
 	))
-	append(&rows, skald.checkbox(
-		ctx, app.settings.obs_roomy_lines, "Blank line between entries in multi-line sources",
-		on_roomy_lines, id = skald.hash_id(ID_ROOMY_LINES),
-	))
-	append(&rows, paragraph(ctx,
-		"OBS text sources have no line-height setting, so the only way to loosen up a list is to send the extra line. Applies to the region and next-boss lists, and to the text files.",
-		th.color.fg_muted, th.font.size_xs,
-	))
-	append(&rows, skald.spacer(th.spacing.xs))
-
-	status, state := obsws_status_text()
-	status_colour := th.color.fg_muted
-	switch state {
-	case .Connected: status_colour = th.color.success
-	case .Failed:    status_colour = th.color.danger
-	case .Connecting, .Disconnected: // muted
-	}
-	append(&rows, skald.text(status, status_colour, th.font.size_sm))
 
 	return skald.scroll(ctx, {0, 0}, skald.col(
 		..rows[:],
@@ -1002,6 +1099,7 @@ overlay_bg_index :: proc(bg: string) -> int {
 // ----------------------------------------------------------------------------
 
 on_tab_selected :: proc(i: int) -> Msg { return Tab_Selected(i) }
+on_obs_tab :: proc(i: int) -> Msg { return Obs_Tab_Selected(i) }
 on_toast_dismissed :: proc() -> Msg { return Toast_Dismissed{} }
 on_save_dialog_closed :: proc() -> Msg { return Save_Dialog_Closed{} }
 

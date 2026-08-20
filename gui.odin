@@ -25,14 +25,26 @@ Tab :: enum {
 
 TAB_LABELS :: [?]string{"Setup", "Checklist", "OBS", "About"}
 
+// The OBS tab covers three separate integrations, each with its own setup
+// in OBS itself. Stacking all three down one page meant no way to tell
+// which controls belonged to which — so they get a panel each.
+Obs_Tab :: enum {
+	Browser,
+	Text,
+	Websocket,
+}
+
+OBS_TAB_LABELS :: [?]string{"Browser source", "Text files", "obs-websocket"}
+
 Gui :: struct {
 	// Set false until the first frame has asked for the poll loop to
 	// start. Skald has no startup-command hook, so `view` kicks this off
 	// once and `update` latches it.
 	started: bool,
 
-	tab: Tab,
-	win: skald.Window_State,
+	tab:     Tab,
+	obs_tab: Obs_Tab,
+	win:     skald.Window_State,
 
 	// Save picker (modal)
 	save_dialog_open: bool,
@@ -72,6 +84,7 @@ Gui :: struct {
 
 Startup :: struct {}
 Tab_Selected :: distinct int
+Obs_Tab_Selected :: distinct int
 Tick :: struct {}
 
 Poll_Done :: struct {
@@ -167,6 +180,7 @@ Window_Changed :: distinct skald.Window_State
 Msg :: union {
 	Startup,
 	Tab_Selected,
+	Obs_Tab_Selected,
 	Tick,
 	Poll_Done,
 	Save_Dialog_Opened,
@@ -277,6 +291,9 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 
 	case Tab_Selected:
 		out.tab = Tab(int(v))
+
+	case Obs_Tab_Selected:
+		out.obs_tab = Obs_Tab(int(v))
 
 	case Tick:
 		// Nothing to poll, or a poll is already in flight — just come

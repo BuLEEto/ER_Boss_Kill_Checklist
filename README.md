@@ -96,9 +96,19 @@ The **About** tab shows the exact path.
 
 ## OBS
 
-All three options live on the **OBS** tab, and they can run at the same time.
-Each has a **? How do I use this** button with step-by-step OBS instructions —
-which source type to add, where the setting lives, and what each value is.
+All three live on the **OBS** tab, one panel each — **Browser source**, **Text
+files**, **obs-websocket** — because each has its own setup on the OBS side and
+stacking them down one page made it impossible to tell which controls belonged
+to which. They can all run at the same time.
+
+Each panel has a **? How do I use this** button with step-by-step OBS
+instructions: which source type to add, where the setting lives, what each
+value is.
+
+Three settings are shared and live on **Browser source**, since that's where
+they're most visible: **Region** (which the text files and the `ER Region`
+sources follow too), **Align** and **Appearance** (which also style the
+web-style obs-websocket sources). The panels that borrow them say so.
 
 ### Browser source (best looking)
 
