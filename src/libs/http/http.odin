@@ -1,5 +1,6 @@
 package http
 
+import "core:c"
 import "core:crypto"
 import "core:crypto/hash"
 import "core:encoding/json"
@@ -14,6 +15,7 @@ import "core:strings"
 import "core:sync"
 import "core:thread"
 import "core:time"
+import zlib "vendor:zlib"
 
 // ============================================================================
 // Error Types
@@ -27,6 +29,7 @@ Error :: enum {
 	Invalid_Request,
 	Invalid_Method,
 	Request_Too_Large,
+	Request_Timeout,
 	Route_Not_Found,
 	Method_Not_Allowed,
 	Session_Not_Found,
@@ -178,6 +181,11 @@ Request :: struct {
 	body:         []byte,
 	remote_addr:  string,
 	allocator:    mem.Allocator,
+
+	// Sessions this request looked up via session_get / session_get_existing.
+	// handle_connection releases these references when the request completes,
+	// so a session destroyed mid-request is freed only once no request uses it.
+	_acquired_sessions: [dynamic]^Session,
 }
 
 // ============================================================================
@@ -212,6 +220,7 @@ Response :: struct {
 	written:      bool, // Has response been sent?
 	streaming:    bool, // Is this an SSE streaming response?
 	headers_sent: bool, // Have headers been flushed to socket?
+	accept_gzip:  bool, // Client accepts gzip encoding (from Accept-Encoding header)
 	allocator:    mem.Allocator,
 }
 
@@ -254,6 +263,7 @@ Session :: struct {
 	mutex:      sync.Mutex,
 	created_at: time.Time,
 	expires_at: time.Time,
+	refcount:   int, // Reference count (atomic); freed when it reaches 0. See session_unref.
 	allocator:  mem.Allocator,
 }
 
@@ -313,6 +323,12 @@ Server :: struct {
 	static_prefix:    string,
 	running:          bool,
 	thread_pool:      [dynamic]^thread.Thread,
+	// NOTE: this is a thread-per-connection model — a worker is occupied for a
+	// connection's whole (keep-alive) lifetime, so the number of connections
+	// served *simultaneously* equals pool_size. Size it to your expected
+	// concurrency, and keep the read deadlines below non-zero so a slow client
+	// can't pin a worker indefinitely. For very high concurrency, front it with a
+	// buffering reverse proxy (Caddy/nginx) that absorbs slow clients.
 	pool_size:        int,
 	request_queue:    Queue(Connection_Task),
 	queue_mutex:      sync.Mutex,
@@ -320,8 +336,16 @@ Server :: struct {
 	shutdown:         bool,
 	allocator:        mem.Allocator,
 	max_request_size:   int, // Maximum request body size (default: 10MB)
-	read_timeout:       time.Duration, // Socket read timeout (default: 30s)
+	read_timeout:       time.Duration, // Per-recv socket read timeout (default: 30s)
 	write_timeout:      time.Duration, // Socket write timeout (default: 30s)
+	// Total wall-clock deadline for reading a request's *headers*, measured from
+	// the first byte. Bounds slow-header (slowloris) attacks. 0 disables. (10s)
+	header_read_timeout: time.Duration,
+	// Total wall-clock deadline for reading a whole request (headers + body).
+	// Bounds slow-drip body attacks. Raise it if you accept large uploads over
+	// slow links (must exceed max_request_size / slowest-acceptable-rate). 0
+	// disables. (default: 60s)
+	request_read_timeout: time.Duration,
 	shutdown_timeout:   time.Duration, // Graceful shutdown timeout (default: 30s)
 	keep_alive_timeout: time.Duration, // Keep-alive idle timeout between requests (default: 5s)
 	max_keep_alive:     int, // Max requests per connection (default: 100)
@@ -346,10 +370,23 @@ Queue :: struct($T: typeid) {
 server_create :: proc(
 	address: string = "0.0.0.0",
 	port: int = 8080,
-	pool_size: int = 4,
+	// Thread-per-connection: pool_size == max simultaneous connections. Workers
+	// spend most of their time blocked on client I/O, so a value well above core
+	// count is normal. Raised from the old default of 4 so a few slow clients
+	// can't starve the whole server.
+	pool_size: int = 16,
 	max_request_size: int = 10 * 1024 * 1024, // 10MB default
-	read_timeout: time.Duration = 30 * time.Second, // 30s default
+	read_timeout: time.Duration = 30 * time.Second, // 30s per-recv default
 	write_timeout: time.Duration = 30 * time.Second, // 30s default
+	header_read_timeout: time.Duration = 10 * time.Second, // total header read deadline
+	// Total headers+body read deadline. MUST scale with max_request_size: this
+	// is wall-clock, so it caps upload throughput as much as upload duration.
+	// The old 60s default silently truncated any body over ~7MB on a 1 Mbps
+	// upstream. 300s covers the 10MB default down to ~256 kbps; raise it if you
+	// accept larger uploads. Slowloris is already handled by header_read_timeout
+	// and the per-recv read_timeout, so a generous value here costs little —
+	// but note pool_size == max connections, so size the pool to match.
+	request_read_timeout: time.Duration = 300 * time.Second,
 	shutdown_timeout: time.Duration = 30 * time.Second, // 30s default
 	keep_alive_timeout: time.Duration = 5 * time.Second, // 5s idle timeout between keep-alive requests
 	max_keep_alive: int = 100, // Max requests per keep-alive connection
@@ -367,6 +404,8 @@ server_create :: proc(
 	server.max_request_size = max_request_size
 	server.read_timeout = read_timeout
 	server.write_timeout = write_timeout
+	server.header_read_timeout = header_read_timeout
+	server.request_read_timeout = request_read_timeout
 	server.shutdown_timeout = shutdown_timeout
 	server.keep_alive_timeout = keep_alive_timeout
 	server.max_keep_alive = max_keep_alive
@@ -411,16 +450,27 @@ server_destroy :: proc(server: ^Server) {
 // Gracefully shutdown the server, waiting for in-flight requests to complete
 server_shutdown :: proc(server: ^Server) {
 	if server == nil do return
-	if server.shutdown do return // Already shutting down
+	// Atomically claim the shutdown. If it was already true, another caller
+	// (e.g. server_destroy) is handling it — return so we don't double-join.
+	if sync.atomic_exchange(&server.shutdown, true) do return
 
-	server.shutdown = true
-	server.running = false
-
-	// Close listener to stop accepting new connections
-	net.close(server.listener)
-
-	// Signal all worker threads to wake up and check shutdown flag
+	// Publish the shutdown to the workers *while holding queue_mutex*, then
+	// broadcast. A worker evaluates its wait predicate (queue empty && !shutdown)
+	// under this same mutex before parking in cond_wait; taking the lock here
+	// guarantees we can't slip the broadcast into the window between a worker's
+	// predicate check and its park, which would otherwise be a lost wakeup and
+	// hang the join below forever.
+	sync.mutex_lock(&server.queue_mutex)
+	sync.atomic_store(&server.running, false)
 	sync.cond_broadcast(&server.queue_cond)
+	sync.mutex_unlock(&server.queue_mutex)
+
+	// Break the accept loop. On Linux a plain close() does NOT wake a thread
+	// already blocked in accept(); shutdown() does — it forces the pending
+	// accept_tcp to return an error, which the accept loop treats as
+	// "running == false → stop". We then close the fd to release it.
+	_ = net.shutdown(server.listener, .Both)
+	net.close(server.listener)
 
 	// Wait for in-flight requests to complete (with timeout)
 	start_time := time.now()
@@ -496,7 +546,7 @@ server_listen_and_serve :: proc(server: ^Server) -> Error {
 		return .Server_Start_Failed
 	}
 	server.listener = socket
-	server.running = true
+	sync.atomic_store(&server.running, true)
 
 	// Start worker threads
 	for _ in 0 ..< server.pool_size {
@@ -507,10 +557,10 @@ server_listen_and_serve :: proc(server: ^Server) -> Error {
 	}
 
 	// Accept loop
-	for server.running {
+	for sync.atomic_load(&server.running) {
 		client, client_endpoint, accept_err := net.accept_tcp(server.listener)
 		if accept_err != nil {
-			if server.running {
+			if sync.atomic_load(&server.running) {
 				continue
 			}
 			break
@@ -542,14 +592,14 @@ server_listen_and_serve :: proc(server: ^Server) -> Error {
 worker_thread_proc :: proc(data: rawptr) {
 	server := cast(^Server)data
 
-	for !server.shutdown {
+	for !sync.atomic_load(&server.shutdown) {
 		// Get task from queue
 		sync.mutex_lock(&server.queue_mutex)
-		for len(server.request_queue.items) == 0 && !server.shutdown {
+		for len(server.request_queue.items) == 0 && !sync.atomic_load(&server.shutdown) {
 			sync.cond_wait(&server.queue_cond, &server.queue_mutex)
 		}
 
-		if server.shutdown {
+		if sync.atomic_load(&server.shutdown) {
 			sync.mutex_unlock(&server.queue_mutex)
 			break
 		}
@@ -599,7 +649,7 @@ handle_connection :: proc(server: ^Server, client: net.TCP_Socket, addr: net.End
 
 	requests_on_conn := 0
 
-	for !server.shutdown {
+	for !sync.atomic_load(&server.shutdown) {
 		start_time := time.now()
 		requests_on_conn += 1
 
@@ -615,16 +665,27 @@ handle_connection :: proc(server: ^Server, client: net.TCP_Socket, addr: net.End
 		allocator := mem.arena_allocator(&arena)
 
 		// Read request
-		req, parse_err := parse_request(client, addr, server.max_request_size, allocator)
+		req, parse_err := parse_request(
+			client,
+			addr,
+			server.max_request_size,
+			server.read_timeout,
+			server.header_read_timeout,
+			server.request_read_timeout,
+			allocator,
+		)
 		if parse_err != .None {
-			// On keep-alive connections, a socket error on read just means the
-			// client closed the connection — not an error worth reporting.
-			if requests_on_conn > 1 && (parse_err == .Socket_Error || parse_err == .Invalid_Request) {
+			// On keep-alive connections, a socket error or stall on read just means
+			// the client went away — not an error worth reporting.
+			if requests_on_conn > 1 &&
+			   (parse_err == .Socket_Error || parse_err == .Invalid_Request || parse_err == .Request_Timeout) {
 				return
 			}
 			error_status: Status = .Bad_Request
 			if parse_err == .Request_Too_Large {
 				error_status = .Payload_Too_Large
+			} else if parse_err == .Request_Timeout {
+				error_status = .Request_Timeout
 			}
 			send_error_response(client, error_status)
 			if server.logger != nil {
@@ -668,8 +729,13 @@ handle_connection :: proc(server: ^Server, client: net.TCP_Socket, addr: net.End
 			allocator = allocator,
 		}
 
+		// Check if client accepts gzip
+		if ae, has_ae := req.headers["accept-encoding"]; has_ae {
+			res.accept_gzip = strings.contains(ae, "gzip")
+		}
+
 		// Set default headers
-		res.headers["Server"] = "Odin-HTTP/1.0"
+		res.headers["Server"] = "IntraSoft"
 		res.headers["Connection"] = "keep-alive" if keep_alive else "close"
 		res.headers["X-Content-Type-Options"] = "nosniff"
 		res.headers["X-Frame-Options"] = "DENY"
@@ -693,9 +759,7 @@ handle_connection :: proc(server: ^Server, client: net.TCP_Socket, addr: net.End
 					clean_rel == "." ||
 					clean_rel == ".." ||
 					strings.has_prefix(clean_rel, "../") ||
-					strings.has_prefix(clean_rel, "..\\") ||
-					strings.has_prefix(clean_rel, "/") ||
-					(len(clean_rel) >= 2 && clean_rel[1] == ':')
+					strings.has_prefix(clean_rel, "/")
 				if bad_rel_path {
 					response_status(&res, .Forbidden)
 					response_send(&res)
@@ -753,6 +817,13 @@ handle_connection :: proc(server: ^Server, client: net.TCP_Socket, addr: net.End
 		if res.streaming do keep_alive = false
 		if conn_val, has := res.headers["Connection"]; has {
 			if conn_val == "close" do keep_alive = false
+		}
+
+		// Release any session references the handler acquired via session_get /
+		// session_get_existing. A session that was destroyed mid-request is freed
+		// here, once no in-flight request references it any more.
+		for session in req._acquired_sessions {
+			session_unref(session)
 		}
 
 		// Clean up heap-allocated request/response bodies before next iteration
@@ -1312,14 +1383,18 @@ bytes_index :: proc(haystack: []byte, needle: []byte) -> int {
 
 // Parse request body as JSON into a struct.
 // Returns false if the body is empty or parsing fails.
-// String fields in the result reference the original req.body bytes (zero-copy),
-// so the result is valid for the lifetime of the request.
+//
+// json.unmarshal allocates (it clones strings and builds any map/slice fields);
+// those allocations are directed at context.temp_allocator, which
+// handle_connection releases with free_all() at the end of each request. The
+// result is therefore valid for the lifetime of the request and must not be
+// retained past the handler.
 request_json :: proc(req: ^Request, $T: typeid) -> (result: T, ok: bool) {
 	if len(req.body) == 0 {
 		return {}, false
 	}
 
-	err := json.unmarshal(req.body, &result)
+	err := json.unmarshal(req.body, &result, allocator = context.temp_allocator)
 	if err != nil {
 		return {}, false
 	}
@@ -1436,18 +1511,100 @@ response_csv :: proc(res: ^Response, data: []byte, filename: string) {
 	response_download(res, data, filename, "text/csv; charset=utf-8")
 }
 
+response_pdf :: proc(res: ^Response, data: []byte, filename: string) {
+	response_download(res, data, filename, "application/pdf")
+}
+
 response_cookie :: proc(res: ^Response, cookie: Cookie) {
 	append(&res.cookies, cookie)
+}
+
+// Minimum body size to bother compressing (smaller bodies may grow with gzip overhead)
+GZIP_MIN_SIZE :: 256
+
+// gzip_compress compresses data using gzip format via vendor zlib.
+// Returns compressed bytes allocated with temp_allocator, or nil on failure.
+@(private)
+gzip_compress :: proc(data: []byte) -> []byte {
+	if len(data) == 0 do return nil
+
+	// Initialize deflate stream for gzip (windowBits = 15+16 = 31)
+	stream := zlib.z_stream{}
+	ret := zlib.deflateInit2(
+		&stream,
+		zlib.DEFAULT_COMPRESSION, // level
+		zlib.DEFLATED,            // method (only one supported)
+		31,                       // windowBits: 15 (default) + 16 (gzip wrapper)
+		8,                        // memLevel: default
+		zlib.DEFAULT_STRATEGY,    // strategy
+	)
+	if ret != zlib.OK do return nil
+
+	// Allocate output buffer — deflateBound gives the worst-case size
+	bound := zlib.deflateBound(&stream, zlib.uLong(len(data)))
+	out_buf := make([]byte, bound, context.temp_allocator)
+
+	stream.next_in = raw_data(data)
+	stream.avail_in = c.uint(len(data))
+	stream.next_out = raw_data(out_buf)
+	stream.avail_out = c.uint(bound)
+
+	ret = zlib.deflate(&stream, zlib.FINISH)
+	zlib.deflateEnd(&stream)
+
+	if ret != zlib.STREAM_END do return nil
+
+	compressed_size := int(stream.total_out)
+	return out_buf[:compressed_size]
+}
+
+// _should_compress checks if the content type is compressible (text, JSON, JS, CSS, XML, SVG).
+@(private)
+_should_compress :: proc(content_type: string) -> bool {
+	if content_type == "" do return false
+	ct := strings.to_lower(content_type, context.temp_allocator)
+	return strings.has_prefix(ct, "text/") ||
+		strings.contains(ct, "json") ||
+		strings.contains(ct, "javascript") ||
+		strings.contains(ct, "xml") ||
+		strings.contains(ct, "svg")
 }
 
 response_send :: proc(res: ^Response) {
 	if res.written do return
 	res.written = true
 
+	// Gzip compress body if client accepts it, body is large enough, and content is compressible
+	compressed := false
+	if res.accept_gzip && !res.streaming && len(res.body) >= GZIP_MIN_SIZE {
+		ct := res.headers["Content-Type"] or_else ""
+		if _should_compress(ct) {
+			if gz := gzip_compress(res.body[:]); gz != nil {
+				// Only use compressed version if it's actually smaller
+				if len(gz) < len(res.body) {
+					// Replace body with compressed data
+					clear(&res.body)
+					append(&res.body, ..gz)
+					compressed = true
+				}
+			}
+		}
+	}
+
 	builder := strings.builder_make(context.temp_allocator)
 
 	// Status line
 	fmt.sbprintf(&builder, "HTTP/1.1 %d %s\r\n", int(res.status), status_text(res.status))
+
+	// Compression headers — Vary is always set on compressible types so
+	// Caddy and browser caches know the response depends on Accept-Encoding
+	if compressed {
+		res.headers["Content-Encoding"] = "gzip"
+	}
+	ct := res.headers["Content-Type"] or_else ""
+	if _should_compress(ct) {
+		res.headers["Vary"] = "Accept-Encoding"
+	}
 
 	// Content-Length header
 	fmt.sbprintf(&builder, "Content-Length: %d\r\n", len(res.body))
@@ -1515,9 +1672,11 @@ _send_all :: proc(socket: net.TCP_Socket, data: []byte) -> bool {
 	for len(remaining) > 0 {
 		sent, send_err := net.send_tcp(socket, remaining)
 		if send_err != nil {
+			fmt.eprintfln("[http] send error after %d/%d bytes: %v", len(data) - len(remaining), len(data), send_err)
 			return false
 		}
 		if sent <= 0 {
+			fmt.eprintfln("[http] send returned 0 bytes; aborting")
 			return false
 		}
 		remaining = remaining[sent:]
@@ -1692,14 +1851,10 @@ session_store_destroy :: proc(store: ^Session_Store) {
 
 	sync.mutex_lock(&store.mutex)
 
+	// Drop the map reference on every session. This is teardown, so no requests
+	// should be in flight; any session whose count reaches zero is freed here.
 	for _, session in store.sessions {
-		for k, v in session.data {
-			delete(k, store.allocator)
-			delete(v, store.allocator)
-		}
-		delete(session.data)
-		delete(session.id, store.allocator)
-		free(session, store.allocator)
+		session_unref(session)
 	}
 	delete(store.sessions)
 	delete(store.cookie_name, store.allocator)
@@ -1715,6 +1870,53 @@ session_count :: proc(store: ^Session_Store) -> int {
 	return len(store.sessions)
 }
 
+// ----------------------------------------------------------------------------
+// Session reference counting
+// ----------------------------------------------------------------------------
+//
+// A session is shared between the store (which keeps it in the sessions map) and
+// any in-flight request that looked it up via session_get / session_get_existing.
+// Freeing it while a request still holds that pointer would be a use-after-free,
+// so lifetime is reference-counted:
+//
+//   * being in the map counts as one reference (the "map reference");
+//   * each session_get / session_get_existing that returns a pointer adds one,
+//     recorded on the Request so it can be released automatically;
+//   * handle_connection releases the request's references when the request ends.
+//
+// The map lookup+incref and the map removal both happen under store.mutex, and a
+// session can only be looked up while it is in the map. So the count can only
+// reach zero after the session has been unlinked, at which point no other thread
+// can obtain a new reference — the final release frees safely without the lock.
+
+@(private)
+session_incref :: proc(session: ^Session) {
+	sync.atomic_add(&session.refcount, 1)
+}
+
+@(private)
+session_unref :: proc(session: ^Session) {
+	// atomic_sub returns the value *before* the subtraction, so == 1 means we
+	// just took it to zero and own the free.
+	if sync.atomic_sub(&session.refcount, 1) == 1 {
+		for k, v in session.data {
+			delete(k, session.allocator)
+			delete(v, session.allocator)
+		}
+		delete(session.data)
+		delete(session.id, session.allocator)
+		free(session, session.allocator)
+	}
+}
+
+// Hand a live session reference to the caller's request and record it so
+// handle_connection releases it when the request completes.
+@(private)
+session_acquire :: proc(req: ^Request, session: ^Session) {
+	session_incref(session)
+	append(&req._acquired_sessions, session)
+}
+
 // Look up an existing valid session without creating one or setting cookies.
 session_get_existing :: proc(store: ^Session_Store, req: ^Request) -> (^Session, bool) {
 	sync.mutex_lock(&store.mutex)
@@ -1723,6 +1925,7 @@ session_get_existing :: proc(store: ^Session_Store, req: ^Request) -> (^Session,
 	if session_id, ok := request_cookie(req, store.cookie_name); ok {
 		if session, found := store.sessions[session_id]; found {
 			if time.diff(time.now(), session.expires_at) > 0 {
+				session_acquire(req, session)
 				return session, true
 			}
 			session_destroy_internal(store, session)
@@ -1740,6 +1943,7 @@ session_get :: proc(store: ^Session_Store, req: ^Request, res: ^Response) -> ^Se
 		if session, found := store.sessions[session_id]; found {
 			// Check if expired
 			if time.diff(time.now(), session.expires_at) > 0 {
+				session_acquire(req, session)
 				return session
 			}
 			// Session expired, remove it
@@ -1753,6 +1957,7 @@ session_get :: proc(store: ^Session_Store, req: ^Request, res: ^Response) -> ^Se
 	session.data = make(map[string]string, 16, store.allocator)
 	session.created_at = time.now()
 	session.expires_at = time.time_add(time.now(), store.ttl)
+	session.refcount = 1 // the store's (map) reference
 	session.allocator = store.allocator
 
 	store.sessions[session.id] = session
@@ -1766,11 +1971,12 @@ session_get :: proc(store: ^Session_Store, req: ^Request, res: ^Response) -> ^Se
 			path      = "/",
 			http_only = true,
 			secure    = store.secure,
-			same_site = .Strict,
+			same_site = .Lax,
 			max_age   = int(time.duration_seconds(store.ttl)),
 		},
 	)
 
+	session_acquire(req, session)
 	return session
 }
 
@@ -1821,6 +2027,15 @@ session_regenerate :: proc(store: ^Session_Store, session: ^Session, res: ^Respo
 	sync.mutex_lock(&store.mutex)
 	defer sync.mutex_unlock(&store.mutex)
 
+	// Remove the cookie that session_get added — its value points to
+	// session.id which we are about to free.  Without this, response_send
+	// would serialise freed memory (use-after-free → corrupt Set-Cookie).
+	for i := len(res.cookies) - 1; i >= 0; i -= 1 {
+		if res.cookies[i].name == store.cookie_name {
+			ordered_remove(&res.cookies, i)
+		}
+	}
+
 	// Remove old ID from store
 	delete_key(&store.sessions, session.id)
 	delete(session.id, store.allocator)
@@ -1840,7 +2055,7 @@ session_regenerate :: proc(store: ^Session_Store, session: ^Session, res: ^Respo
 			path      = "/",
 			http_only = true,
 			secure    = store.secure,
-			same_site = .Strict,
+			same_site = .Lax,
 			max_age   = int(time.duration_seconds(store.ttl)),
 		},
 	)
@@ -1862,20 +2077,18 @@ session_destroy :: proc(store: ^Session_Store, session: ^Session, res: ^Response
 			max_age   = -1,
 			http_only = true,
 			secure    = store.secure,
-			same_site = .Strict,
+			same_site = .Lax,
 		},
 	)
 }
 
+// Unlink a session from the store and drop the store's (map) reference.
+// Must be called with store.mutex held. The memory is freed only once the last
+// outstanding reference is released (see session_unref), so this is safe to call
+// even while a request still holds a pointer returned by session_get.
 session_destroy_internal :: proc(store: ^Session_Store, session: ^Session) {
 	delete_key(&store.sessions, session.id)
-	for k, v in session.data {
-		delete(k, store.allocator)
-		delete(v, store.allocator)
-	}
-	delete(session.data)
-	delete(session.id, store.allocator)
-	free(session, store.allocator)
+	session_unref(session)
 }
 
 // Destroy all sessions for a given user ID. Useful for forcing logout
@@ -2033,6 +2246,7 @@ session_load_from_file :: proc(store: ^Session_Store, filename: string) -> bool 
 		session.data = make(map[string]string, 16, store.allocator)
 		session.created_at = transmute(time.Time)e.created_ns
 		session.expires_at = expires_at
+		session.refcount = 1 // the store's (map) reference
 		session.allocator = store.allocator
 
 		for k, v in e.data {
@@ -2051,8 +2265,78 @@ session_load_from_file :: proc(store: ^Session_Store, filename: string) -> bool 
 
 Template :: struct {
 	content:   string,
+	path:      string, // Source path or "(in-memory)" — used for warnings only
 	nodes:     [dynamic]Template_Node,
 	allocator: mem.Allocator,
+}
+
+// ----------------------------------------------------------------------------
+// Template diagnostics
+// ----------------------------------------------------------------------------
+//
+// Goal: surface template bugs (typos, unclosed blocks, missing variables)
+// at first-render rather than silently producing wrong HTML in production.
+//
+//   template_warn(source, tag, fmt, args...) — single entry point.
+//   TEMPLATE_STRICT=1 in env → warnings panic instead (for dev/CI).
+//   Per-process dedupe keyed by "source|tag|fmt" so a render loop with
+//   thousands of items only logs the issue once.
+
+@(private)
+_template_warnings_seen: map[string]bool
+@(private)
+_template_warnings_seen_mu: sync.Mutex
+@(private)
+_template_strict_checked: bool
+@(private)
+_template_strict: bool
+
+template_strict_mode :: proc() -> bool {
+	if _template_strict_checked do return _template_strict
+	_template_strict_checked = true
+	v, ok := os.lookup_env("TEMPLATE_STRICT", context.temp_allocator)
+	if ok && (v == "1" || v == "true" || v == "yes") {
+		_template_strict = true
+	}
+	return _template_strict
+}
+
+template_warn :: proc(source: string, tag: string, msg_fmt: string, args: ..any) {
+	dedupe_key := fmt.tprintf("%s|%s|%s", source, tag, msg_fmt)
+	sync.mutex_lock(&_template_warnings_seen_mu)
+	already := _template_warnings_seen[dedupe_key]
+	if !already {
+		if _template_warnings_seen == nil {
+			_template_warnings_seen = make(map[string]bool)
+		}
+		_template_warnings_seen[strings.clone(dedupe_key)] = true
+	}
+	sync.mutex_unlock(&_template_warnings_seen_mu)
+	if already do return
+
+	src_label := source if source != "" else "(unknown)"
+	tag_label := ""
+	if tag != "" {
+		tag_label = fmt.tprintf(" at {{%s}}", tag)
+	}
+	body := fmt.tprintf(msg_fmt, ..args)
+	line := fmt.tprintf("[TEMPLATE WARN] %s%s — %s", src_label, tag_label, body)
+	fmt.println(line)
+	if template_strict_mode() {
+		panic(line)
+	}
+}
+
+// Reset the warning dedupe cache. Useful in tests or after editing templates
+// in dev so a fixed bug stops being suppressed forever.
+template_warnings_reset :: proc() {
+	sync.mutex_lock(&_template_warnings_seen_mu)
+	defer sync.mutex_unlock(&_template_warnings_seen_mu)
+	for k in _template_warnings_seen {
+		delete(k)
+	}
+	delete(_template_warnings_seen)
+	_template_warnings_seen = nil
 }
 
 Partial_Node :: struct {
@@ -2126,11 +2410,7 @@ Template_Set :: struct {
 }
 
 path_contains_unsafe_chars :: proc(path: string) -> bool {
-	when ODIN_OS == .Windows {
-		return strings.contains(path, "\x00")
-	} else {
-		return strings.contains(path, "\\") || strings.contains(path, "\x00")
-	}
+	return strings.contains(path, "\\") || strings.contains(path, "\x00")
 }
 
 path_is_within_root_resolved :: proc(root_path, target_path: string) -> bool {
@@ -2155,12 +2435,11 @@ path_is_within_root_resolved :: proc(root_path, target_path: string) -> bool {
 		return false
 	}
 
-	sep := "/" when ODIN_OS != .Windows else "\\"
-	if root_clean == "/" || root_clean == "\\" {
-		return strings.has_prefix(target_clean, root_clean)
+	if root_clean == "/" {
+		return strings.has_prefix(target_clean, "/")
 	}
 
-	root_prefix := strings.concatenate({root_clean, sep}, context.temp_allocator)
+	root_prefix := strings.concatenate({root_clean, "/"}, context.temp_allocator)
 	return target_clean == root_clean || strings.has_prefix(target_clean, root_prefix)
 }
 
@@ -2180,17 +2459,22 @@ template_load :: proc(path: string, allocator := context.allocator) -> (^Templat
 		return nil, .File_Not_Found
 	}
 
-	return template_parse(string(content), allocator)
+	return template_parse(string(content), allocator, clean_path)
 }
 
 // Parse template from string
-template_parse :: proc(content: string, allocator := context.allocator) -> (^Template, Error) {
+template_parse :: proc(
+	content: string,
+	allocator := context.allocator,
+	source: string = "(in-memory)",
+) -> (^Template, Error) {
 	tpl := new(Template, allocator)
 	tpl.content = strings.clone(content, allocator)
+	tpl.path = strings.clone(source, allocator)
 	tpl.nodes = make([dynamic]Template_Node, allocator)
 	tpl.allocator = allocator
 
-	parse_template_nodes(content, &tpl.nodes, allocator)
+	parse_template_nodes(content, &tpl.nodes, allocator, tpl.path)
 
 	return tpl, .None
 }
@@ -2264,7 +2548,12 @@ parse_variable_with_filters :: proc(expr: string, allocator: mem.Allocator) -> V
 }
 
 // Parse the body of an if block, handling elseif and else
-parse_if_body :: proc(content: string, if_node: ^If_Node, allocator: mem.Allocator) {
+parse_if_body :: proc(
+	content: string,
+	if_node: ^If_Node,
+	allocator: mem.Allocator,
+	source: string = "",
+) {
 	// Split content at elseif and else boundaries (respecting nesting)
 	// Returns slices of content for: main body, [elseif bodies...], else body
 
@@ -2348,19 +2637,19 @@ parse_if_body :: proc(content: string, if_node: ^If_Node, allocator: mem.Allocat
 		switch section_type {
 		case 0:
 			// main body
-			parse_template_nodes(section, &if_node.body, allocator)
+			parse_template_nodes(section, &if_node.body, allocator, source)
 		case 1:
 			// elseif
 			branch := Elseif_Branch {
 				condition = parse_condition(elseif_conditions[elseif_idx], allocator),
 				body      = make([dynamic]Template_Node, allocator),
 			}
-			parse_template_nodes(section, &branch.body, allocator)
+			parse_template_nodes(section, &branch.body, allocator, source)
 			append(&if_node.elseif_branches, branch)
 			elseif_idx += 1
 		case 2:
 			// else
-			parse_template_nodes(section, &if_node.else_body, allocator)
+			parse_template_nodes(section, &if_node.else_body, allocator, source)
 		}
 	}
 }
@@ -2370,6 +2659,7 @@ parse_template_nodes :: proc(
 	content: string,
 	nodes: ^[dynamic]Template_Node,
 	allocator: mem.Allocator,
+	source: string = "",
 ) {
 	pos := 0
 
@@ -2402,7 +2692,8 @@ parse_template_nodes :: proc(
 		// Find end of tag
 		end := strings.index(content[pos:], "}}")
 		if end == -1 {
-			// Malformed, treat rest as text
+			// Unclosed tag — preserve as text but warn loudly so it's caught in dev
+			template_warn(source, "", "unclosed tag — '{{' at offset %d has no matching '}}'", pos)
 			append(nodes, Template_Node(Text_Node{text = strings.clone(content[pos:], allocator)}))
 			break
 		}
@@ -2411,11 +2702,15 @@ parse_template_nodes :: proc(
 		pos += end + 2
 
 		// Parse tag
-		if strings.has_prefix(tag_content, "#if ") {
+		if strings.has_prefix(tag_content, "!") {
+			// Comment — discard. Body is everything between {{! and }}.
+			continue
+		} else if strings.has_prefix(tag_content, "#if ") {
 			condition_str := strings.trim_space(tag_content[4:])
 			// Find matching {{/if}}
 			body_end, _ := find_block_end(content[pos:], "if")
 			if body_end == -1 {
+				template_warn(source, tag_content, "unclosed block — no matching {{/if}}")
 				continue
 			}
 
@@ -2428,7 +2723,7 @@ parse_template_nodes :: proc(
 
 			// Parse body, looking for elseif and else
 			block_content := content[pos:pos + body_end]
-			parse_if_body(block_content, &if_node, allocator)
+			parse_if_body(block_content, &if_node, allocator, source)
 
 			append(nodes, Template_Node(if_node))
 			pos += body_end + block_end_tag_len("if")
@@ -2436,6 +2731,7 @@ parse_template_nodes :: proc(
 			list_name := strings.trim_space(tag_content[6:])
 			body_end, _ := find_block_end(content[pos:], "each")
 			if body_end == -1 {
+				template_warn(source, tag_content, "unclosed block — no matching {{/each}}")
 				continue
 			}
 
@@ -2443,14 +2739,63 @@ parse_template_nodes :: proc(
 				list_name = strings.clone(list_name, allocator),
 				body      = make([dynamic]Template_Node, allocator),
 			}
-			parse_template_nodes(content[pos:pos + body_end], &each_node.body, allocator)
+			parse_template_nodes(content[pos:pos + body_end], &each_node.body, allocator, source)
 
 			append(nodes, Template_Node(each_node))
 			pos += body_end + block_end_tag_len("each")
+		} else if strings.has_prefix(tag_content, "#eq ") {
+			// {{#eq field "value"}}...{{/eq}} — shorthand for {{#if field == "value"}}
+			eq_args := strings.trim_space(tag_content[4:])
+			body_end, else_pos := find_block_end(content[pos:], "eq")
+			if body_end == -1 {
+				template_warn(source, tag_content, "unclosed block — no matching {{/eq}}")
+				continue
+			}
+
+			// Parse: field "value" or field 'value' or field value
+			eq_left := ""
+			eq_right := ""
+			if space_idx := strings.index(eq_args, " "); space_idx != -1 {
+				eq_left = strings.trim_space(eq_args[:space_idx])
+				eq_right_raw := strings.trim_space(eq_args[space_idx + 1:])
+				if len(eq_right_raw) >= 2 {
+					if (eq_right_raw[0] == '"' && eq_right_raw[len(eq_right_raw) - 1] == '"') ||
+					   (eq_right_raw[0] == '\'' && eq_right_raw[len(eq_right_raw) - 1] == '\'') {
+						eq_right_raw = eq_right_raw[1:len(eq_right_raw) - 1]
+					}
+				}
+				eq_right = eq_right_raw
+			} else {
+				template_warn(source, tag_content, "{{#eq}} expects 'field \"value\"' — got '%s'", eq_args)
+			}
+
+			eq_node := If_Node{
+				condition = Template_Condition{
+					left     = strings.clone(eq_left, allocator),
+					operator = "==",
+					right    = strings.clone(eq_right, allocator),
+				},
+				body            = make([dynamic]Template_Node, allocator),
+				elseif_branches = make([dynamic]Elseif_Branch, allocator),
+				else_body       = make([dynamic]Template_Node, allocator),
+			}
+
+			// Split body/else if {{else}} is present
+			if else_pos != -1 {
+				parse_template_nodes(content[pos:pos + else_pos], &eq_node.body, allocator, source)
+				else_content_start := else_pos + len("{{else}}")
+				parse_template_nodes(content[pos + else_content_start:pos + body_end], &eq_node.else_body, allocator, source)
+			} else {
+				parse_template_nodes(content[pos:pos + body_end], &eq_node.body, allocator, source)
+			}
+
+			append(nodes, Template_Node(eq_node))
+			pos += body_end + block_end_tag_len("eq")
 		} else if strings.has_prefix(tag_content, "#unless ") {
 			condition := strings.trim_space(tag_content[8:])
 			body_end, _ := find_block_end(content[pos:], "unless")
 			if body_end == -1 {
+				template_warn(source, tag_content, "unclosed block — no matching {{/unless}}")
 				continue
 			}
 
@@ -2458,7 +2803,7 @@ parse_template_nodes :: proc(
 				condition = strings.clone(condition, allocator),
 				body      = make([dynamic]Template_Node, allocator),
 			}
-			parse_template_nodes(content[pos:pos + body_end], &unless_node.body, allocator)
+			parse_template_nodes(content[pos:pos + body_end], &unless_node.body, allocator, source)
 
 			append(nodes, Template_Node(unless_node))
 			pos += body_end + block_end_tag_len("unless")
@@ -2467,8 +2812,18 @@ parse_template_nodes :: proc(
 			partial_name := strings.trim_space(tag_content[2:])
 			if len(partial_name) > 0 {
 				append(nodes, Template_Node(Partial_Node{name = strings.clone(partial_name, allocator)}))
+			} else {
+				template_warn(source, tag_content, "empty partial name — expected '{{> name.ohtml}}'")
 			}
+		} else if tag_content == "/if" || tag_content == "/each" || tag_content == "/unless" || tag_content == "/eq" {
+			// Closing tag with no opener at this scope — almost always a typo or
+			// nesting mismatch. Skip the tag (no node produced) but warn.
+			template_warn(source, tag_content, "stray closing tag — no matching opener at this scope")
 		} else {
+			// Warn if this looks like a block tag that we don't recognise
+			if strings.has_prefix(tag_content, "#") || strings.has_prefix(tag_content, "/") {
+				template_warn(source, tag_content, "unknown block tag — will be treated as a variable (likely a typo or missing helper)")
+			}
 			// Variable (possibly with filters)
 			var_node := parse_variable_with_filters(tag_content, allocator)
 			append(nodes, Template_Node(var_node))
@@ -2542,7 +2897,8 @@ template_render :: proc(
 	set: ^Template_Set = nil,
 ) -> string {
 	builder := strings.builder_make(allocator)
-	render_nodes(&tpl.nodes, ctx, &builder, set)
+	source := tpl.path if tpl != nil else ""
+	render_nodes(&tpl.nodes, ctx, &builder, set, 0, source)
 	return strings.to_string(builder)
 }
 
@@ -2553,10 +2909,14 @@ render_nodes :: proc(
 	builder: ^strings.Builder,
 	set: ^Template_Set = nil,
 	depth: int = 0,
+	source: string = "",
 ) {
 	// Guard against infinite partial recursion
 	MAX_PARTIAL_DEPTH :: 16
-	if depth > MAX_PARTIAL_DEPTH do return
+	if depth > MAX_PARTIAL_DEPTH {
+		template_warn(source, "", "partial recursion exceeded MAX_PARTIAL_DEPTH=%d — rendering halted", MAX_PARTIAL_DEPTH)
+		return
+	}
 	for node in nodes {
 		switch n in node {
 		case Text_Node:
@@ -2578,15 +2938,27 @@ render_nodes :: proc(
 			} else if val, ok := ctx.values[n.name]; ok {
 				value = val
 				has_value = true
+			} else if bval, bok := ctx.bools[n.name]; bok {
+				value = "true" if bval else "false"
+				has_value = true
 			}
 
-			if has_value {
-				// Apply filters
+			// If `| default "x"` is present, treat missing variables as empty
+			// so the default substitutes in (and suppress the missing-var warn).
+			has_default_filter := false
+			for f in n.filters {
+				if f.name == "default" {
+					has_default_filter = true
+					break
+				}
+			}
+
+			if has_value || has_default_filter {
 				result := value
 				skip_escape := false
 
 				for filter in n.filters {
-					result, skip_escape = apply_filter(result, raw_value, filter)
+					result, skip_escape = apply_filter(result, raw_value, filter, source, n.name)
 				}
 
 				if skip_escape {
@@ -2594,13 +2966,20 @@ render_nodes :: proc(
 				} else {
 					strings.write_string(builder, html_escape(result))
 				}
+			} else {
+				// Skip the warning for the special @ vars and dot-paths used by
+				// {{#each}} — those are populated dynamically and may legitimately
+				// not be in this scope.
+				if !strings.has_prefix(n.name, "@") && n.name != "." {
+					template_warn(source, n.name, "variable not in context — rendering as empty (typo? missing struct field? wrong handler? if intentional, use `| default \"\"`)")
+				}
 			}
 
 		case If_Node:
 			// Evaluate main condition
 			if evaluate_condition(n.condition, ctx) {
 				body := n.body
-				render_nodes(&body, ctx, builder, set, depth)
+				render_nodes(&body, ctx, builder, set, depth, source)
 			} else {
 				// Try elseif branches
 				branch_matched := false
@@ -2608,7 +2987,7 @@ render_nodes :: proc(
 					branch := n.elseif_branches[idx]
 					if evaluate_condition(branch.condition, ctx) {
 						body := branch.body
-						render_nodes(&body, ctx, builder, set, depth)
+						render_nodes(&body, ctx, builder, set, depth, source)
 						branch_matched = true
 						break
 					}
@@ -2617,7 +2996,7 @@ render_nodes :: proc(
 				// Fall through to else if no branch matched
 				if !branch_matched {
 					else_body := n.else_body
-					render_nodes(&else_body, ctx, builder, set, depth)
+					render_nodes(&else_body, ctx, builder, set, depth, source)
 				}
 			}
 
@@ -2630,8 +3009,10 @@ render_nodes :: proc(
 					item_ctx.values["@index"] = fmt.tprintf("%d", idx)
 					item_ctx.bools["@first"] = idx == 0
 					item_ctx.bools["@last"] = idx == list_len - 1
-					render_nodes(&body, item_ctx, builder, set, depth)
+					render_nodes(&body, item_ctx, builder, set, depth, source)
 				}
+			} else {
+				template_warn(source, fmt.tprintf("#each %s", n.list_name), "list not in context — block rendered nothing (typo? missing slice field?)")
 			}
 
 		case Unless_Node:
@@ -2647,15 +3028,20 @@ render_nodes :: proc(
 
 			body := n.body
 			if !condition_true {
-				render_nodes(&body, ctx, builder, set, depth)
+				render_nodes(&body, ctx, builder, set, depth, source)
 			}
 
 		case Partial_Node:
 			// Include another template by name from the Template_Set
 			if set != nil {
 				if partial_tpl, ok := set.templates[n.name]; ok {
-					render_nodes(&partial_tpl.nodes, ctx, builder, set, depth + 1)
+					partial_source := partial_tpl.path if partial_tpl.path != "" else n.name
+					render_nodes(&partial_tpl.nodes, ctx, builder, set, depth + 1, partial_source)
+				} else {
+					template_warn(source, fmt.tprintf("> %s", n.name), "partial not found in template set")
 				}
+			} else {
+				template_warn(source, fmt.tprintf("> %s", n.name), "partial used but no template set passed to render")
 			}
 		}
 	}
@@ -2670,6 +3056,11 @@ evaluate_condition :: proc(cond: Template_Condition, ctx: ^Template_Context) -> 
 		}
 		if val, ok := ctx.values[cond.left]; ok {
 			return len(val) > 0 && val != "false" && val != "0"
+		}
+		// Truthy lists: {{#if items}} matches when the list is non-empty.
+		// Lets templates drop the paired `has_x: bool` boilerplate.
+		if list, ok := ctx.lists[cond.left]; ok {
+			return len(list) > 0
 		}
 		return false
 	}
@@ -2724,7 +3115,13 @@ evaluate_condition :: proc(cond: Template_Condition, ctx: ^Template_Context) -> 
 
 // Apply a filter to a value
 // Returns: (result string, skip_html_escape)
-apply_filter :: proc(value: string, raw_value: any, filter: Template_Filter) -> (string, bool) {
+apply_filter :: proc(
+	value: string,
+	raw_value: any,
+	filter: Template_Filter,
+	source: string = "",
+	var_name: string = "",
+) -> (string, bool) {
 	switch filter.name {
 	case "raw":
 		// Don't escape HTML
@@ -2777,8 +3174,17 @@ apply_filter :: proc(value: string, raw_value: any, filter: Template_Filter) -> 
 			}
 		}
 		return value, false
+
+	case "default":
+		// Substitute arg if value is empty. Useful for nullable fields:
+		// {{notes | default "—"}}
+		if value == "" {
+			return filter.arg, false
+		}
+		return value, false
 	}
 
+	template_warn(source, fmt.tprintf("%s | %s", var_name, filter.name), "unknown filter — value passed through unchanged. Known filters: raw, upper, lower, date, time, datetime, format, truncate, default")
 	return value, false
 }
 
@@ -2962,7 +3368,36 @@ _template_scan_dir :: proc(
 
 		tpl, load_err := template_load(file.fullpath, allocator)
 		if load_err == .None {
-			set.templates[file.name] = tpl
+			// Register under basename for back-compat (existing {{> file.ohtml}}
+			// references continue to work). When two files share a basename the
+			// last one wins — but we now also register under the root-relative
+			// path, so callers can disambiguate as {{> dir/file.ohtml}}.
+			if existing, dup := set.templates[file.name]; dup {
+				template_warn(file.fullpath, "", "duplicate basename '%s' — overwrites previous '%s' for bare '{{> %s}}'. Use the qualified form '{{> <subdir>/%s}}' to target a specific copy.", file.name, existing.path, file.name, file.name)
+			}
+			set.templates[strings.clone(file.name, allocator)] = tpl
+
+			// Also register under root-relative path so subpath partials work:
+			//   {{> edi_import/header.ohtml}}
+			// filepath.rel allocates rel_path in `allocator`, so it's already
+			// long-lived — no extra clone needed. We only allocate again if we
+			// have to normalise backslashes.
+			rel_path, rel_err := filepath.rel(root_dir, file.fullpath, allocator)
+			if rel_err == .None && rel_path != file.name {
+				if strings.contains(rel_path, "\\") {
+					normalized, _ := strings.replace_all(rel_path, "\\", "/", allocator)
+					delete(rel_path, allocator)
+					set.templates[normalized] = tpl
+				} else {
+					set.templates[rel_path] = tpl
+				}
+			} else if rel_err == .None {
+				// rel_path == basename (file is at root) — already registered
+				// above under file.name; free this duplicate allocation.
+				delete(rel_path, allocator)
+			}
+		} else {
+			template_warn(file.fullpath, "", "failed to load template: %v", load_err)
 		}
 	}
 }
@@ -3023,6 +3458,7 @@ template_set_respond :: proc(
 template_destroy :: proc(tpl: ^Template) {
 	if tpl == nil do return
 	delete(tpl.content, tpl.allocator)
+	if tpl.path != "" do delete(tpl.path, tpl.allocator)
 	destroy_nodes(&tpl.nodes, tpl.allocator)
 	delete(tpl.nodes)
 	free(tpl, tpl.allocator)
@@ -3030,8 +3466,17 @@ template_destroy :: proc(tpl: ^Template) {
 
 template_set_destroy :: proc(set: ^Template_Set) {
 	if set == nil do return
-	for _, tpl in set.templates {
-		template_destroy(tpl)
+	// Templates may be registered under multiple keys (basename + relative path
+	// for subpath partials), so dedupe by pointer to avoid a double-free.
+	seen: map[rawptr]bool
+	defer delete(seen)
+	for key, tpl in set.templates {
+		ptr := rawptr(tpl)
+		if !seen[ptr] {
+			seen[ptr] = true
+			template_destroy(tpl)
+		}
+		delete(key, set.allocator)
 	}
 	delete(set.templates)
 	free(set, set.allocator)
@@ -3121,6 +3566,15 @@ populate_context_from_any :: proc(ctx: ^Template_Context, data: any, allocator: 
 	ti := reflect.type_info_base(type_info_of(data.id))
 
 	#partial switch info in ti.variant {
+	case reflect.Type_Info_String:
+		// Plain string item (e.g. in {{#each}} over [dynamic]string) — expose as {{.}}
+		if str, ok := reflect.as_string(data); ok {
+			ctx.values["."] = str
+		}
+	case reflect.Type_Info_Integer:
+		if i, ok := reflect.as_i64(data); ok {
+			ctx.values["."] = fmt.tprintf("%d", i)
+		}
 	case reflect.Type_Info_Struct:
 		// Iterate struct fields
 		for name, i in info.names[:info.field_count] {
@@ -3178,28 +3632,14 @@ add_field_to_context :: proc(
 		}
 
 	case reflect.Type_Info_Slice:
-		// Handle slices of structs for {{#each}}
-		elem_ti := info.elem
-		if elem_ti != nil {
+		// Handle slices of structs for {{#each}}. Always register the list even
+		// when empty so the renderer can distinguish "handler forgot to set
+		// field" from "handler set it to empty" — and so a future {{#if x}}
+		// truthy-list check sees the empty list as false rather than missing.
+		if info.elem != nil {
 			slice_len := reflect.length(field)
-			if slice_len > 0 {
-				list := make([]^Template_Context, slice_len, allocator)
-				for i in 0 ..< slice_len {
-					item := reflect.index(field, i)
-					item_ctx := template_context_create(allocator)
-					populate_context_from_any(item_ctx, item, allocator)
-					list[i] = item_ctx
-				}
-				ctx.lists[name] = list
-			}
-		}
-
-	case reflect.Type_Info_Dynamic_Array:
-		// Handle dynamic arrays of structs for {{#each}}
-		arr_len := reflect.length(field)
-		if arr_len > 0 {
-			list := make([]^Template_Context, arr_len, allocator)
-			for i in 0 ..< arr_len {
+			list := make([]^Template_Context, slice_len, allocator)
+			for i in 0 ..< slice_len {
 				item := reflect.index(field, i)
 				item_ctx := template_context_create(allocator)
 				populate_context_from_any(item_ctx, item, allocator)
@@ -3207,6 +3647,18 @@ add_field_to_context :: proc(
 			}
 			ctx.lists[name] = list
 		}
+
+	case reflect.Type_Info_Dynamic_Array:
+		// Same as slice: always register, even when empty.
+		arr_len := reflect.length(field)
+		list := make([]^Template_Context, arr_len, allocator)
+		for i in 0 ..< arr_len {
+			item := reflect.index(field, i)
+			item_ctx := template_context_create(allocator)
+			populate_context_from_any(item_ctx, item, allocator)
+			list[i] = item_ctx
+		}
+		ctx.lists[name] = list
 
 	case reflect.Type_Info_Struct:
 		// Check if this looks like a timestamp (has year, month, day fields)
@@ -3293,22 +3745,33 @@ template_set_render_with :: proc(
 // Internal Helpers
 // ============================================================================
 
-// Parse HTTP request
+// Parse HTTP request.
+// read_timeout           — per-recv socket timeout (already set on the socket by
+//                          the caller; used again when switching to the body phase).
+// header_read_timeout    — total wall-clock budget for the header phase, measured
+//                          from the first received byte (0 = no limit).
+// request_read_timeout   — total wall-clock budget for the whole request read,
+//                          headers + body, from the first byte (0 = no limit).
+// These bound slow-drip (slowloris) clients so one connection can't pin a worker.
 parse_request :: proc(
 	socket: net.TCP_Socket,
 	addr: net.Endpoint,
 	max_body_size: int,
+	read_timeout: time.Duration,
+	header_read_timeout: time.Duration,
+	request_read_timeout: time.Duration,
 	allocator: mem.Allocator,
 ) -> (
 	Request,
 	Error,
 ) {
 	req := Request {
-		headers   = make(map[string]string, 32, allocator),
-		cookies   = make(map[string]string, 16, allocator),
-		params    = make(map[string]string, 8, allocator),
-		query     = make(map[string]string, 16, allocator),
-		allocator = allocator,
+		headers            = make(map[string]string, 32, allocator),
+		cookies            = make(map[string]string, 16, allocator),
+		params             = make(map[string]string, 8, allocator),
+		query              = make(map[string]string, 16, allocator),
+		_acquired_sessions = make([dynamic]^Session, allocator),
+		allocator          = allocator,
 	}
 
 	// Format remote address
@@ -3331,6 +3794,8 @@ parse_request :: proc(
 	buffer: [8192]byte
 	total_read := 0
 	headers_end := -1
+	read_started := false
+	read_start: time.Time // set when the first byte arrives; anchors the deadlines
 
 	read_loop: for total_read < len(buffer) {
 		n, err := net.recv_tcp(socket, buffer[total_read:])
@@ -3341,6 +3806,19 @@ parse_request :: proc(
 			break
 		}
 		total_read += n
+
+		// Once the client starts sending, cap how long the header phase may run
+		// (from first byte) and how long a single recv may block — a slow-drip
+		// client can no longer pin this worker beyond header_read_timeout.
+		if !read_started {
+			read_started = true
+			read_start = time.now()
+			if header_read_timeout > 0 {
+				net.set_option(socket, .Receive_Timeout, header_read_timeout)
+			}
+		} else if header_read_timeout > 0 && time.diff(read_start, time.now()) > header_read_timeout {
+			return req, .Request_Timeout
+		}
 
 		// Check for end of headers
 		data := string(buffer[:total_read])
@@ -3436,20 +3914,52 @@ parse_request :: proc(
 		return req, .Invalid_Request
 	}
 
-	// Read body if Content-Length specified
+	// Read body if Content-Length specified.
+	// Strict decimal parse: the value must be ASCII digits only. strconv.parse_int
+	// with the default base 0 would accept "0x10", "+100" and "1_000", which an
+	// upstream proxy interprets differently — a request-smuggling vector. A
+	// malformed value is rejected outright rather than silently treated as a
+	// zero-length body, so leftover bytes can't desync the next keep-alive request.
 	content_length_str: string
 	have_content_length: bool
 	content_length_str, have_content_length = req.headers["content-length"]
 	if have_content_length {
-		if content_length, ok := strconv.parse_int(content_length_str); ok && content_length > 0 {
+		if !is_ascii_digits(content_length_str) {
+			return req, .Invalid_Request
+		}
+		// Bound the digit count so the parse can't overflow i64. 15 digits is far
+		// beyond any real body (10^15 bytes) yet safely within range.
+		if len(content_length_str) > 15 {
+			return req, .Request_Too_Large
+		}
+		content_length, ok := strconv.parse_int(content_length_str, 10)
+		if !ok {
+			return req, .Invalid_Request
+		}
+		if content_length > 0 {
 			if max_body_size > 0 && content_length > max_body_size {
 				return req, .Request_Too_Large
 			}
 			req.body = make([]byte, content_length)
 			copied := copy(req.body, buffer[body_start:total_read])
 
+			// The header phase tightened the per-recv timeout to
+			// header_read_timeout; restore the (usually longer) body per-recv
+			// timeout now that we're streaming the body.
+			if copied < content_length && read_timeout > 0 {
+				net.set_option(socket, .Receive_Timeout, read_timeout)
+			}
+
 			// Read remaining body if needed
 			for copied < content_length {
+				// Bound total time spent reading one request (headers + body) so a
+				// slow-drip body can't pin this worker indefinitely.
+				if request_read_timeout > 0 && read_started &&
+				   time.diff(read_start, time.now()) > request_read_timeout {
+					delete(req.body)
+					req.body = nil
+					return req, .Request_Timeout
+				}
 				n, err := net.recv_tcp(socket, req.body[copied:])
 				if err != nil || n == 0 {
 					break
@@ -3536,6 +4046,17 @@ hex_digit :: proc(c: byte) -> int {
 		return int(c - 'A' + 10)
 	}
 	return -1
+}
+
+// True only if s is non-empty and every byte is an ASCII digit 0-9.
+// Used to parse Content-Length strictly (no sign, base prefix, or '_' separators).
+@(private = "file")
+is_ascii_digits :: proc(s: string) -> bool {
+	if len(s) == 0 do return false
+	for i in 0 ..< len(s) {
+		if s[i] < '0' || s[i] > '9' do return false
+	}
+	return true
 }
 
 // HTML escape for template output

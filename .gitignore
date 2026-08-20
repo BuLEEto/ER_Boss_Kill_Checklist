@@ -1,0 +1,35 @@
+# Build output
+/er-boss-checklist
+/er-boss-checklist.exe
+/build/
+*.o
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# Packaging artefacts
+/er-boss-checklist_*/
+*.deb
+*.zip
+*.7z
+*.tar.gz
+
+# Runtime-generated, user-specific — never commit (contains local save paths)
+settings.json
+/obs-output/
+
+# Bundled runtime libs copied in by the build
+libSDL3.so*
+SDL3.dll
+
+# Local test data
+/testsaves/
+*.sl2
+*.co2
+*.rd2
+
+# Editor / tooling
+.claude/settings.local.json
+.DS_Store

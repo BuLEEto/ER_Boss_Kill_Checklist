@@ -1,0 +1,54 @@
+Twemoji-Mozilla — attribution and licence
+==========================================
+
+Skald bundles `skald/assets/Twemoji-Mozilla.ttf` as the default
+colour-emoji font for the runa text backend. Apps that call
+`skald.font_use_default_emoji(r)` register it as a fallback to Inter
+so codepoints in the emoji range render in full COLRv0 colour.
+
+Artwork
+-------
+The emoji glyphs are derived from **Twemoji** by Twitter, Inc. and
+contributors (now part of the open-source community). Twemoji
+artwork is licensed under the Creative Commons Attribution 4.0
+International licence (CC-BY-4.0).
+
+  https://creativecommons.org/licenses/by/4.0/
+
+Required attribution: "Twemoji by Twitter, Inc. and contributors —
+CC-BY 4.0 — https://twemoji.twitter.com".
+
+Apps that ship Skald binaries are redistributing the Twemoji
+artwork; an attribution line in your app's About / credits / docs
+satisfies the CC-BY-4.0 notice requirement. Apps that don't call
+`font_use_default_emoji` and never reference the font are still
+shipping it (Odin's `#load` embeds the bytes at compile time), so
+the attribution applies.
+
+Build
+-----
+The specific binary bundled here is the **Twemoji-Mozilla** build —
+a TTF assembling Twemoji's SVG sources into COLRv0 layered glyphs
+suitable for shipping inside an OpenType font. The build tooling is
+maintained by Mozilla under the Apache 2.0 licence at:
+
+  https://github.com/mozilla/twemoji-colr
+
+The artwork licence (CC-BY-4.0) governs redistribution; the tool
+licence (Apache 2.0) only matters if you regenerate the font.
+
+Why bundle
+----------
+Skald's runa backend reads COLRv0 colour glyphs and composites them
+into an RGBA atlas page. Shipping a known-good COLRv0 font in-tree
+means `font_use_default_emoji` "just works" on every platform
+without depending on the host OS's emoji set (which is CBDT/sbix on
+macOS, COLRv1 on modern Linux, and absent or out-of-date on many
+Windows installs).
+
+Disabling
+---------
+Apps that never want colour emoji can simply not call
+`font_use_default_emoji`; the bytes are still in the binary
+(blame Odin's `#load`-at-compile-time semantics) but no fallback is
+registered, no atlas page allocates, no draw cost.

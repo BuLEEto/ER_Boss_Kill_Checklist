@@ -1,5 +1,56 @@
 # Third Party Credits
 
+## GUI Framework
+
+### Skald
+
+**Source:** [Skald](https://github.com/BuLEEto/Skald) by Lee Fry
+
+**Used for:** the desktop GUI — Elm-architecture widgets, Vulkan renderer,
+layout, theming. Vendored at `vendor/skald/`; see
+`vendor/skald/VENDORED.md` for the pinned commit and what was trimmed.
+
+**License:** zlib — full text at `vendor/skald/LICENSE`
+
+Skald in turn bundles the following, acknowledged in full at
+`vendor/skald/NOTICE`:
+
+- **runa** (Lee Fry + contributors) — pure-Odin OpenType text engine, zlib.
+  The default text backend, so this is what our binary ships.
+- **Inter** (The Inter Project Authors) — bundled UI typeface, SIL OFL 1.1.
+  Embedded into the binary at compile time.
+- **Twemoji Mozilla** — colour emoji font, CC-BY 4.0. Embedded into the
+  binary at compile time, which makes shipping this app a
+  redistribution of the Twemoji artwork. The licence requires the
+  attribution line below, which is also shown in the app's About tab:
+
+  > Twemoji by Twitter, Inc. and contributors — CC-BY 4.0
+
+- **Unicode Character Database** — © Unicode, Inc. Property tables that
+  runa embeds at compile time; each file keeps its own copyright header
+  and pointer to <https://www.unicode.org/terms_of_use.html>.
+- **fontstash** (Mikko Mononen), zlib, and **stb** (Sean T. Barrett)
+  `stb_truetype` / `stb_image`, MIT / public domain — only reached on
+  the legacy `-define:SKALD_RUNA=false` text path, which we do not build.
+
+### SDL3
+
+**Source:** [SDL](https://libsdl.org) by Sam Lantinga and the SDL contributors
+
+**Used for:** windowing, input, clipboard, native file dialogs, HiDPI —
+Skald's only C dependency, reached through Odin's `vendor:sdl3` bindings.
+Shipped alongside the binary (`libSDL3.so.0` on Linux, `SDL3.dll` on
+Windows).
+
+**License:** zlib
+
+### Vulkan
+
+Rendering goes through the Vulkan loader already present on the user's
+system (`libvulkan.so.1` / `vulkan-1.dll`, shipped with modern GPU
+drivers). Specification by the Khronos Group; nothing from it is
+redistributed here.
+
 ## Save File Format & Event Flags
 
 The save file parser and event flag BST data used to read boss kill status,
