@@ -85,6 +85,21 @@ obs_source_label :: proc(k: Obs_Source) -> string {
 	return ""
 }
 
+// The /widget?type= value backing this source when the web style is in
+// use. The overlay isn't one of these — it has its own full page.
+obs_source_widget :: proc(k: Obs_Source) -> string {
+	switch k {
+	case .Progress:      return "progress"
+	case .Next_Boss:     return "next"
+	case .Deaths:        return "deaths"
+	case .Character:     return "character"
+	case .Region:        return "region"
+	case .Region_Bosses: return "region_bosses"
+	case .Overlay:       return ""
+	}
+	return ""
+}
+
 obs_source_enabled :: proc(k: Obs_Source) -> bool {
 	switch k {
 	case .Progress:      return app.settings.obsws_send_progress
@@ -446,10 +461,14 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn) {
 			continue
 		}
 
-		kind_id := kind == .Overlay ? "browser_source" : input_kind
-		settings := kind == .Overlay \
-			? obsws_browser_settings(with_size = true) \
-			: obsws_default_text_settings(input_kind)
+		web := kind == .Overlay || app.settings.obsws_source_style == "web"
+		kind_id := web ? "browser_source" : input_kind
+		settings: string
+		switch {
+		case kind == .Overlay: settings = obsws_browser_settings(with_size = true)
+		case web:              settings = obsws_widget_settings(kind, with_size = true)
+		case:                  settings = obsws_default_text_settings(input_kind)
+		}
 
 		b := strings.builder_make(context.temp_allocator)
 		strings.write_string(&b, `{"sceneName":"`)
@@ -495,6 +514,27 @@ obsws_browser_settings :: proc(with_size := false) -> string {
 		// Generous enough for the longest list; the card inside is only
 		// as big as its content, and the rest of the page is transparent.
 		strings.write_string(&b, `,"width":520,"height":900,"reroute_audio":false`)
+	}
+	strings.write_string(&b, `}`)
+	return strings.to_string(b)
+}
+
+// One value as its own browser source. Same reasoning as
+// obsws_browser_settings: never send "css" (that box is the user's), and
+// only send a size at creation so a resize survives.
+@(private = "file")
+obsws_widget_settings :: proc(kind: Obs_Source, with_size := false) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, `{"url":"`)
+	json_escape_string(&b, fmt.tprintf(
+		"http://localhost:%d/widget?type=%s&align=%s",
+		app.server.port, obs_source_widget(kind), app.settings.overlay_align,
+	))
+	strings.write_string(&b, `"`)
+	if with_size {
+		// Wide enough for the longest boss name; lists get more height.
+		h := kind == .Region_Bosses ? 420 : 90
+		fmt.sbprintf(&b, `,"width":760,"height":%d,"reroute_audio":false`, h)
 	}
 	strings.write_string(&b, `}`)
 	return strings.to_string(b)
@@ -730,15 +770,19 @@ obsws_push_update :: proc() {
 	for kind in Obs_Source {
 		if !obs_source_enabled(kind) do continue
 
-		// The browser source updates itself over SSE, so all it needs is
-		// its URL kept in step with the overlay settings — mode, region,
+		// A browser source updates itself over SSE, so all it needs is its
+		// URL kept in step with the overlay settings — mode, region,
 		// alignment. Sent as inputSettings like everything else.
-		if kind == .Overlay {
+		if kind == .Overlay || app.settings.obsws_source_style == "web" {
+			url_settings := kind == .Overlay \
+				? obsws_browser_settings() \
+				: obsws_widget_settings(kind)
+
 			b := strings.builder_make(context.temp_allocator)
 			strings.write_string(&b, `{"inputName":"`)
 			json_escape_string(&b, obs_source_name(kind))
 			strings.write_string(&b, `","inputSettings":`)
-			strings.write_string(&b, obsws_browser_settings())
+			strings.write_string(&b, url_settings)
 			strings.write_string(&b, `,"overlay":true}`)
 			obsws_request(conn, "SetInputSettings", strings.to_string(b))
 			continue

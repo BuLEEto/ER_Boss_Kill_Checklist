@@ -129,6 +129,7 @@ ID_OVERLAY_COUNT  :: "obs.overlay_count"
 ID_OVERLAY_REGION :: "obs.overlay_region"
 ID_ROOMY_LINES    :: "obs.roomy_lines"
 ID_OVERLAY_ALIGN  :: "obs.overlay_align"
+ID_SOURCE_STYLE   :: "obs.source_style"
 ID_OVERLAY_BG     :: "obs.overlay_bg"
 ID_SHOW_DEATHS    :: "obs.show_deaths"
 ID_TEXT_TOGGLE    :: "obs.text_enabled"
@@ -640,8 +641,8 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 
 		append(&rows, skald.form_row(ctx, "Align",
 			skald.segmented(
-				ctx, {"Left", "Right"},
-				app.settings.overlay_align == "right" ? 1 : 0, on_overlay_align,
+				ctx, {"Left", "Centre", "Right"},
+				overlay_align_index(app.settings.overlay_align), on_overlay_align,
 				id = skald.hash_id(ID_OVERLAY_ALIGN),
 			),
 			label_width = 120,
@@ -729,6 +730,21 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		on_obsws_remember, id = skald.hash_id(ID_WS_REMEMBER),
 	))
 
+	append(&rows, skald.spacer(th.spacing.xs))
+	append(&rows, skald.form_row(ctx, "Source style",
+		skald.segmented(
+			ctx, {"Text", "Web"},
+			app.settings.obsws_source_style == "web" ? 1 : 0, on_obs_source_style,
+			id = skald.hash_id(ID_SOURCE_STYLE),
+		),
+		label_width = 120,
+	))
+	append(&rows, paragraph(ctx,
+		app.settings.obsws_source_style == "web" \
+			? "Each value is its own small browser source, so alignment, line height and colours are real CSS — restyle any of them with Custom CSS in its properties, or change align= in its URL. Costs a browser instance per source." \
+			: "OBS text sources: cheap, no browser instance, but OBS gives them no alignment and no line height. Switch to Web if you want lists that align.",
+		th.color.fg_muted, th.font.size_xs,
+	))
 	append(&rows, skald.spacer(th.spacing.xs))
 	append(&rows, skald.text("Send to OBS", th.color.fg, th.font.size_sm))
 	for kind in Obs_Source {
@@ -879,8 +895,8 @@ overlay_url_string :: proc(allocator := context.allocator) -> string {
 	if app.settings.overlay_bg != "none" {
 		fmt.sbprintf(&b, "&bg=%s", app.settings.overlay_bg)
 	}
-	if app.settings.overlay_align == "right" {
-		strings.write_string(&b, "&align=right")
+	if app.settings.overlay_align != "left" {
+		fmt.sbprintf(&b, "&align=%s", app.settings.overlay_align)
 	}
 	if app.settings.show_deaths {
 		strings.write_string(&b, "&deaths=true")
@@ -1030,8 +1046,24 @@ on_overlay_bg :: proc(i: int) -> Msg {
 
 on_overlay_count :: proc(v: f32) -> Msg { return Overlay_Count_Changed(int(v + 0.5)) }
 
+on_obs_source_style :: proc(i: int) -> Msg {
+	return Obs_Source_Style_Selected(i == 1 ? "web" : "text")
+}
+
 on_overlay_align :: proc(i: int) -> Msg {
-	return Overlay_Align_Selected(i == 1 ? "right" : "left")
+	switch i {
+	case 1:  return Overlay_Align_Selected("center")
+	case 2:  return Overlay_Align_Selected("right")
+	case:    return Overlay_Align_Selected("left")
+	}
+}
+
+overlay_align_index :: proc(a: string) -> int {
+	switch a {
+	case "center": return 1
+	case "right":  return 2
+	case:          return 0
+	}
 }
 
 on_overlay_region :: proc(label: string) -> Msg {

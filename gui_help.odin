@@ -142,8 +142,20 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 				"The Send to OBS list decides what gets created. Unticked sources are never added to your scene. ER Region shows an area and its count (\"Caelid (12/15)\"); ER Region Bosses lists what's left in it, one per line.",
 			},
 			Help_Step{
-				"Want it properly laid out? Tick ER Overlay",
-				"That one isn't a text source — it's a browser source pointed at the overlay page, created and kept in step for you. Text sources can't align or space multi-line lists at all; the overlay page can, because it's HTML. Recolour it with Custom CSS in its properties.",
+				"Text or Web?",
+				"Text makes OBS text sources: cheap, but OBS gives them no alignment and no line height, which is why a multi-line list stays ragged. Web makes each value its own small browser source instead — real CSS, so lists align and space properly. It costs a browser instance per source.",
+			},
+			Help_Step{
+				"Styling them your way (Web)",
+				"Each one is a separate source, so each has its own Custom CSS box in its properties. Colours are variables:\n\n:root { --gold: #ff4444; --text: #ffffff; }\n\nFor size or spacing, target .widget-value and .widget-line. The app never writes to that box.",
+			},
+			Help_Step{
+				"Aligning them individually",
+				"Align on this tab sets them all at once. To differ per source, open that source's properties and change align=right in its URL to left or center — or put  body { text-align: center !important }  in its Custom CSS.",
+			},
+			Help_Step{
+				"ER Overlay is the whole card",
+				"The one non-text entry either way: a browser source showing the full overlay page, everything in one box. Off by default because it overlaps the individual sources.",
 			},
 			Help_Step{
 				"Pick which area they follow",

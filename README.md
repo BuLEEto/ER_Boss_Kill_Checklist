@@ -178,12 +178,38 @@ Restyle and position them in OBS however you like: the app only ever changes
 their text, and a source that already exists is never created, moved or
 restyled.
 
-**ER Overlay** in that list is the odd one out: not a text source but a browser
-source pointed at the overlay page, created and kept in step for you. It's the
-way to get a properly aligned, properly spaced list into OBS, since text sources
-can't do either. Off by default, because it overlaps what the text sources show.
+**Source style** decides what the individual sources are made of:
 
-**Send to OBS** on the same tab picks which of the seven you want. Unticking one
+| | |
+|---|---|
+| **Text** | OBS text sources. Cheap — no browser instance — but OBS gives them no text alignment and no line height, so a multi-line list is stuck ragged-left. |
+| **Web** | Each value becomes its own small browser source pointed at `/widget`. Real CSS: alignment and line height work, and each source has its own Custom CSS box. Costs a browser instance per source. |
+
+Either way they're separate sources, so you position each one independently.
+
+**ER Overlay** is the odd one out in both styles: a browser source showing the
+whole overlay card in one box. Off by default, since it overlaps the individual
+sources.
+
+**Send to OBS** on the same tab picks which of the seven you want.
+
+#### Styling and aligning individual sources (Web style)
+
+Each is its own browser source, so each has its own **Custom CSS** box:
+
+```css
+:root { --gold: #ff4444; --text: #ffffff; }   /* colours */
+.widget-value, .widget-line { font-size: 40px; line-height: 1.6; }
+```
+
+Alignment can be set three ways, narrowest wins:
+
+1. **Align** on the OBS tab — sets every source at once
+2. That source's **URL** — change `align=right` to `left` or `center`
+3. That source's **Custom CSS** — `body { text-align: center !important }`
+
+The `!important` is needed for the third because the app's rule is a class
+selector and outranks a bare `body`. Unticking one
 *hides* it in OBS rather than deleting it — anything you've styled or positioned
 survives, and re-ticking brings it straight back. OBS has no undo for a deleted
 source, so hiding is the safer default; delete it yourself if you want it gone.

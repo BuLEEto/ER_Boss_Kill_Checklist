@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{title}}</title>
+    <link rel="stylesheet" href="/static/overlay.css">
+    <link rel="icon" href="data:,">
+</head>
+<body class="widget {{body_class}}">
+    <div class="widget-box">
+        {{#if show_label}}<div class="widget-label">{{label}}</div>{{/if}}
+        {{#if is_list}}
+        <div class="widget-list">
+            {{#each lines}}
+            <div class="widget-line">{{text}}</div>
+            {{/each}}
+        </div>
+        {{else}}
+        <div class="widget-value">{{value}}</div>
+        {{/if}}
+    </div>
+    <script src="/static/overlay.js"></script>
+</body>
+</html>

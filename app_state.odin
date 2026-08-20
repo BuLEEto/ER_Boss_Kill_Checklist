@@ -51,6 +51,7 @@ App_State :: struct {
 	// Templates, loaded once at startup
 	tpl_overlay: ^http.Template,
 	tpl_mobile:  ^http.Template,
+	tpl_widget:  ^http.Template,
 
 	// Web server
 	lan_ip:     string,

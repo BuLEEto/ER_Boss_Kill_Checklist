@@ -120,6 +120,7 @@ Port_Committed :: struct {}
 Overlay_Mode_Selected :: distinct string
 Overlay_Bg_Selected :: distinct string
 Overlay_Align_Selected :: distinct string
+Obs_Source_Style_Selected :: distinct string
 Overlay_Count_Changed :: distinct int
 Overlay_Region_Selected :: distinct string
 Obs_Source_Toggled :: struct {
@@ -179,6 +180,7 @@ Msg :: union {
 	Overlay_Mode_Selected,
 	Overlay_Bg_Selected,
 	Overlay_Align_Selected,
+	Obs_Source_Style_Selected,
 	Overlay_Count_Changed,
 	Overlay_Region_Selected,
 	Obs_Source_Toggled,
@@ -457,6 +459,17 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		// sources, so push the change everywhere rather than waiting for
 		// the next boss to die.
 		out = gui_after_data_change(out)
+
+	case Obs_Source_Style_Selected:
+		sync.guard(&app.mu)
+		settings_set_string(&app.settings.obsws_source_style, string(v))
+		app_save_settings()
+		// The sources are a different OBS input kind either way, so the
+		// existing ones can't be converted — reconnecting creates the new
+		// shape and hides whatever the old style left behind.
+		if app.settings.obsws_enabled {
+			return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
+		}
 
 	case Obs_Source_Toggled:
 		sync.guard(&app.mu)

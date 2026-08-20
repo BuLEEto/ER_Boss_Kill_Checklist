@@ -67,6 +67,7 @@ server_start :: proc(h: ^Server_Handle, port: int) -> bool {
 	http.router_get(router, "/", handle_root)
 	http.router_get(router, "/overlay", handle_overlay)
 	http.router_get(router, "/mobile", handle_mobile)
+	http.router_get(router, "/widget", handle_widget)
 	http.router_get(router, "/events", handle_sse)
 	http.router_get(router, "/api/status", handle_api_status)
 	srv.router = router
@@ -200,7 +201,9 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 	bg := len(bg_param) > 0 ? bg_param : app.settings.overlay_bg
 
 	classes := make([dynamic]string, context.temp_allocator)
-	if align == "right" do append(&classes, "align-right")
+	if align == "right" || align == "center" {
+		append(&classes, fmt.tprintf("align-%s", align))
+	}
 	if bg == "green" || bg == "magenta" do append(&classes, fmt.tprintf("bg-%s", bg))
 	body_class := strings.join(classes[:], " ", context.temp_allocator)
 
@@ -454,4 +457,120 @@ parse_int_default :: proc(s: string, fallback: int) -> int {
 	if len(s) == 0 do return fallback
 	if v, ok := strconv.parse_int(s); ok do return v
 	return fallback
+}
+
+// ----------------------------------------------------------------------------
+// Single-value widgets
+//
+// One page per value, so OBS can hold each as its own browser source and
+// the user positions them independently — the same granularity as the
+// text sources, but with the alignment and line height that text sources
+// don't have.
+//
+// The value shown mirrors what the obs-websocket text sources send, so
+// the two integrations never disagree about what "progress" means.
+// ----------------------------------------------------------------------------
+
+Widget_Line :: struct {
+	text: string,
+}
+
+handle_widget :: proc(req: ^http.Request, res: ^http.Response) {
+	tpl := app.tpl_widget
+	if tpl == nil {
+		http.response_status(res, .Internal_Error)
+		http.response_text(res, "Widget template not loaded")
+		return
+	}
+
+	kind_param, _ := http.request_query(req, "type")
+	align_param, _ := http.request_query(req, "align")
+	label_param, _ := http.request_query(req, "label")
+
+	sync.shared_guard(&app.mu)
+
+	align := len(align_param) > 0 ? align_param : app.settings.overlay_align
+	body_class := ""
+	if align == "right" || align == "center" {
+		body_class = fmt.tprintf("align-%s", align)
+	}
+
+	label, value, lines := widget_content(kind_param)
+
+	views := make([]Widget_Line, len(lines), context.temp_allocator)
+	for line, i in lines do views[i] = Widget_Line{text = line}
+
+	data := struct {
+		title:      string,
+		label:      string,
+		value:      string,
+		lines:      []Widget_Line,
+		is_list:    bool,
+		show_label: bool,
+		body_class: string,
+	}{
+		title      = label,
+		label      = label,
+		value      = value,
+		lines      = views,
+		is_list    = len(lines) > 0,
+		// Off unless asked for: a caption above every widget is a lot of
+		// furniture when you already know what you put on screen.
+		show_label = label_param == "true",
+		body_class = body_class,
+	}
+
+	http.template_respond_with(res, tpl, data)
+}
+
+// The label, single value and (for lists) lines for one widget type.
+widget_content :: proc(kind: string) -> (label: string, value: string, lines: []string) {
+	total, killed := count_bosses(app.regions)
+	name, level := app_active_character()
+
+	switch kind {
+	case "killed":
+		return "Defeated", fmt.tprintf("%d", killed), nil
+	case "total":
+		return "Total", fmt.tprintf("%d", total), nil
+	case "remaining":
+		return "Remaining", fmt.tprintf("%d", total - killed), nil
+	case "percent":
+		pct := total > 0 ? killed * 100 / total : 0
+		return "Complete", fmt.tprintf("%d%%", pct), nil
+	case "deaths":
+		return "Deaths", fmt.tprintf("%d", app.death_count), nil
+	case "character":
+		if len(name) == 0 do return "Character", "No character", nil
+		return "Character", fmt.tprintf("%s — RL %d", name, level), nil
+	case "next":
+		next := app_next_bosses(1, context.temp_allocator)
+		if len(next) == 0 do return "Next", "All bosses defeated", nil
+		return "Next", fmt.tprintf("%s — %s", next[0].boss, next[0].place), nil
+	case "next_list":
+		next := app_next_bosses(app.settings.overlay_next_count, context.temp_allocator)
+		out := make([dynamic]string, context.temp_allocator)
+		for b in next do append(&out, fmt.tprintf("%s — %s", b.boss, b.place))
+		if len(out) == 0 do append(&out, "All bosses defeated")
+		return "Next up", "", out[:]
+	case "region":
+		idx := app_focus_region()
+		if idx < 0 do return "Region", "All regions cleared", nil
+		r_total, r_killed := count_region_bosses(&app.regions[idx])
+		return "Region", fmt.tprintf(
+			"%s (%d/%d)", app.regions[idx].region_name, r_killed, r_total,
+		), nil
+	case "region_bosses":
+		idx := app_focus_region()
+		out := make([dynamic]string, context.temp_allocator)
+		if idx >= 0 {
+			for &b in app.regions[idx].bosses {
+				if !b.killed do append(&out, b.boss)
+			}
+		}
+		if len(out) == 0 do append(&out, "All regions cleared")
+		return "Remaining here", "", out[:]
+	case:
+		return "Progress", fmt.tprintf("%d / %d bosses", killed, total), nil
+	}
 }

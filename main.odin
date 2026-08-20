@@ -110,6 +110,13 @@ load_templates :: proc() -> bool {
 		return false
 	}
 	app.tpl_mobile = mobile
+
+	widget, widget_err := http.template_load("templates/widget.html")
+	if widget_err != .None {
+		fmt.eprintfln("Could not load templates/widget.html: %v", widget_err)
+		return false
+	}
+	app.tpl_widget = widget
 	return true
 }
 

@@ -33,6 +33,8 @@ body.bg-magenta { background: #ff00ff; }
  * source can be parked against the right of the canvas and the text grows
  * leftwards instead of pushing out of frame. */
 body.align-right { text-align: right; }
+body.align-center { text-align: center; }
+body.align-center .overlay { margin-left: auto; margin-right: auto; }
 body.align-right .overlay { margin-left: auto; }
 body.align-right .header-row,
 body.align-right .summary-row { flex-direction: row-reverse; }
@@ -192,3 +194,64 @@ body.bg-magenta .overlay-header {
     padding: 20px;
     color: var(--text-dim);
 }
+
+/* ---------------------------------------------------------------------------
+ * Single-value widgets
+ *
+ * One browser source per value, so each can be positioned in OBS
+ * independently the way a text source can — but as a web page, so it gets
+ * the two things OBS text sources simply don't have: real alignment for
+ * every line, and a line height you can set.
+ *
+ * Everything here reads from the same :root variables as the overlay, so
+ * a couple of lines in OBS's Custom CSS box restyle any of them.
+ * ------------------------------------------------------------------------- */
+
+body.widget {
+    background: transparent;
+    padding: 0;
+    text-align: left;
+}
+
+/* Alignment is a body class so it can be set three ways, in increasing
+ * order of specificity:
+ *
+ *   1. the app's Align control, which sets it for every source at once
+ *   2. this source's own URL — change align=left to right or center in
+ *      the browser source's properties, per source
+ *   3. Custom CSS on this source:  body { text-align: center !important }
+ *
+ * The !important is needed for (3) because the class selector below
+ * outranks a bare `body` rule. */
+body.widget.align-right  { text-align: right; }
+body.widget.align-center { text-align: center; }
+
+.widget-box {
+    display: block;
+    padding: 2px 4px;
+}
+
+.widget-label {
+    font-size: 12px;
+    color: var(--gold);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: bold;
+    margin-bottom: 2px;
+}
+
+.widget-value,
+.widget-line {
+    font-size: 28px;
+    font-weight: bold;
+    color: var(--text);
+    /* The line height OBS text sources don't let you set. */
+    line-height: 1.35;
+    /* Legible over gameplay without needing an outline filter. */
+    text-shadow:
+        -2px -2px 0 #000, 2px -2px 0 #000,
+        -2px  2px 0 #000, 2px  2px 0 #000,
+         0    2px 6px rgba(0, 0, 0, 0.8);
+}
+
+.widget-line { white-space: nowrap; }
