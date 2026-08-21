@@ -11442,22 +11442,14 @@ scroll_advance :: proc(
 	// previous frame's stamp list (one-frame lag is imperceptible for wheel
 	// UX and avoids a second render pass).
 	//
-	// LOCAL PATCH (see PATCHES.md): innermost is decided by the smallest
-	// viewport under the cursor, not by stamp order.
-	//
-	// Stamp order was the wrong proxy. It only runs outer -> inner when
-	// every scroller in the chain resolves at the same stage, and a
-	// fill-mode scroll — scroll(ctx, {0,0}, ...) — doesn't: it defers
-	// through `sized`, so its scroll_advance runs during layout, after an
-	// inner fixed-size scroll built as one of its own arguments has
-	// already stamped. The list then reads inner -> outer, the backwards
-	// scan found the OUTER rect first, and the inner scroller never
-	// claimed. That is a combobox dropdown inside a scrolling page: the
-	// dropdown's wheel was dead and the page behind it scrolled instead.
-	//
-	// Area is order-independent and needs no depth plumbing. Nested
-	// viewports strictly contain one another, so the inner one is the
-	// smaller; siblings don't overlap, so at most one contains the point.
+	// Innermost is the smallest viewport under the cursor — not the last one
+	// stamped. Stamp order only runs outer -> inner when every scroller
+	// resolves at the same stage; a fill-mode scroll(ctx, {0,0}, ...) defers
+	// through `sized` and stamps *after* an inner fixed-size scroll built as
+	// its own argument, so a combobox/select popup inside a fill-mode page
+	// would read as outer and its wheel went dead. Area is order-independent:
+	// nested viewports strictly contain one another (inner is smaller), and
+	// siblings don't overlap (at most one contains the point).
 	claim_wheel := false
 	if hovered && scrollable && ctx.input.scroll.y != 0 {
 		best_id: Widget_ID

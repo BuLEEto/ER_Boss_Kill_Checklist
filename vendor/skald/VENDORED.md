@@ -2,9 +2,9 @@
 
 Upstream: <https://github.com/BuLEEto/Skald>
 
-    Commit:  914b8c5709ec13f0f181fe17a6517adf4a42dfec
-    Date:    2026-08-19 22:11:49 +0100
-    Subject: Use copy() instead of iterative byte assignment. (#6)
+    Commit:  8b782d3859463ebc91905d1d3b8fe0d8289c81e5
+    Date:    2026-08-21 11:54:27 +0100
+    Subject: fix: wheel-scroll dropdowns nested in a scrolling page
 
 Licence: zlib — see `LICENSE`. Bundled-asset and third-party
 acknowledgements are in `NOTICE`.

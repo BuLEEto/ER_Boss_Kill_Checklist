@@ -8,8 +8,7 @@
 
 **Used for:** the desktop GUI — Elm-architecture widgets, Vulkan renderer,
 layout, theming. Vendored at `vendor/skald/`; see
-`vendor/skald/VENDORED.md` for the pinned commit and what was trimmed, and
-[PATCHES.md](PATCHES.md) for the local changes made to this copy.
+`vendor/skald/VENDORED.md` for the pinned commit and what was trimmed.
 
 **License:** zlib — full text at `vendor/skald/LICENSE`
 
