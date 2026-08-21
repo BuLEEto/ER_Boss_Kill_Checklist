@@ -36,8 +36,31 @@ body.align-right { text-align: right; }
 body.align-center { text-align: center; }
 body.align-center .overlay { margin-left: auto; margin-right: auto; }
 body.align-right .overlay { margin-left: auto; }
+/* Right- and centre-aligned cards pack each row against the alignment edge
+ * in normal reading order, instead of throwing its two halves to opposite
+ * sides.
+ *
+ * space-between is the right look for the default left-aligned card, where
+ * it reads as a table — name on the left, count on the right. Mirroring
+ * that for a right-aligned card (which is what row-reverse did) strands
+ * the count on the far left with its own name at the other end of the row,
+ * and since the card fills the browser source, "the other end" can be the
+ * width of the screen. Things that belong together should sit together.
+ *
+ * Packing right still lines the counts up, because they end up last on
+ * every row — the names go ragged instead, which is what right-aligned
+ * text is supposed to do. */
 body.align-right .header-row,
-body.align-right .summary-row { flex-direction: row-reverse; }
+body.align-right .summary-row {
+    justify-content: flex-end;
+    gap: 0.6em;
+}
+
+body.align-center .header-row,
+body.align-center .summary-row {
+    justify-content: center;
+    gap: 0.6em;
+}
 body.align-right .boss-item { padding: 4px 8px 4px 0; }
 
 .overlay {
