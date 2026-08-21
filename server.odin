@@ -211,6 +211,12 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 		append(&classes, fmt.tprintf("align-%s", align))
 	}
 	if bg == "green" || bg == "magenta" do append(&classes, fmt.tprintf("bg-%s", bg))
+
+	// The card's backing. A query parameter can override it, same as the
+	// rest, so one source can differ without a setting for it.
+	card_param, _ := http.request_query(req, "card")
+	card := len(card_param) > 0 ? card_param : app.settings.overlay_card
+	if card == "none" do append(&classes, "card-none")
 	body_class := strings.join(classes[:], " ", context.temp_allocator)
 
 	focus_region := parse_int_default(region_param, -1)
@@ -220,17 +226,25 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 	total, killed := count_bosses(app.regions)
 	slot_name, slot_level := app_active_character()
 
-	region_summaries := make([]Overlay_Region_Summary, len(app.regions), context.temp_allocator)
-	for &r, i in app.regions {
+	// Summary mode lists every area by default, which on a full boss list
+	// is 30-odd rows — more than a sensibly sized browser source can show,
+	// and most of them struck-through areas that are done with.
+	hide_cleared_param, _ := http.request_query(req, "hide_cleared")
+	hide_cleared := app.settings.overlay_hide_cleared || hide_cleared_param == "true"
+
+	summaries := make([dynamic]Overlay_Region_Summary, 0, len(app.regions), context.temp_allocator)
+	for &r in app.regions {
 		rt, rk := count_region_bosses(&r)
-		region_summaries[i] = Overlay_Region_Summary {
+		if hide_cleared && rk >= rt && rt > 0 do continue
+		append(&summaries, Overlay_Region_Summary{
 			region_name   = r.region_name,
 			region_killed = rk,
 			region_total  = rt,
 			has_remaining = rk < rt,
 			is_complete   = rk == rt,
-		}
+		})
 	}
+	region_summaries := summaries[:]
 
 	// No region in the URL: fall back to whatever the app is pinned to,
 	// so a copied overlay URL and the OBS sources agree.
@@ -583,9 +597,11 @@ handle_widget :: proc(req: ^http.Request, res: ^http.Response) {
 		value      = value,
 		lines      = views,
 		is_list    = len(lines) > 0,
-		// Off unless asked for: a caption above every widget is a lot of
-		// furniture when you already know what you put on screen.
-		show_label = label_param == "true",
+		// On unless turned off. These pages are standalone sources — a
+		// bare "57" on a stream says nothing, and the caption is the only
+		// thing that makes it a death counter rather than a number.
+		show_label = label_param != "false" &&
+		             (app.settings.widget_show_labels || label_param == "true"),
 		body_class = body_class,
 		theme_css  = overlay_theme_css(look),
 	}

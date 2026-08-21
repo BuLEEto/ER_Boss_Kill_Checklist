@@ -1,5 +1,7 @@
 package main
 
+import "core:fmt"
+
 // ============================================================================
 // Single-value pages
 //
@@ -59,20 +61,43 @@ widget_label :: proc(k: Widget_Kind) -> string {
 	return ""
 }
 
-// Shown under the name in the list, so someone can tell Region from
-// Region bosses without adding both to OBS to find out.
+// What the page is, in words. Deliberately never a sample value: the list
+// shows the live one right next to this, and two things that look like
+// values but disagree reads as a bug rather than as an example.
 widget_example :: proc(k: Widget_Kind) -> string {
 	switch k {
-	case .Progress:      return "113 / 207 bosses"
+	case .Progress:      return "bosses defeated out of the list total"
 	case .Next_Boss:     return "the next boss standing, with its location"
 	case .Deaths:        return "the character's total deaths"
 	case .Attempts:      return "deaths since your last boss kill"
-	case .Session:       return "2 bosses · 31 deaths, this sitting"
-	case .Character:     return "Tarnished — RL 150"
-	case .Region:        return "Caelid (12/15)"
+	case .Session:       return "bosses and deaths this sitting"
+	case .Character:     return "character name and rune level"
+	case .Region:        return "the focused area and its count"
 	case .Region_Bosses: return "what's left in that area, one per line"
 	}
 	return ""
+}
+
+// What this page is showing right now, for the list in the app.
+//
+// The real value rather than a canned example. An example that doesn't
+// match what's on screen isn't a hint, it's a contradiction — "Caelid
+// (12/15)" sat next to a Region setting following Siofra River and read as
+// a stale value rather than as illustration. Showing the live value makes
+// the list a preview of all eight pages and can't disagree with itself.
+//
+// Runs on the GUI thread during view building, like every other read of
+// app state in the view.
+widget_preview :: proc(k: Widget_Kind) -> string {
+	label, value, lines := widget_content(widget_slug(k))
+	_ = label
+
+	if len(lines) > 0 {
+		if len(lines) == 1 do return lines[0]
+		return fmt.tprintf("%s  (+%d more)", lines[0], len(lines) - 1)
+	}
+	if len(value) == 0 do return "—"
+	return value
 }
 
 widget_kind_from_slug :: proc(slug: string) -> (Widget_Kind, bool) {

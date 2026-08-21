@@ -55,7 +55,8 @@ POLL_SECONDS_DEFAULT :: 5
 //   6  region and appearance are per-integration rather than shared
 //   7  attempts bookmark, kill banner, and the overlay card's own text size
 //   8  obs-websocket removed; the single-value pages get per-page looks
-SETTINGS_VERSION :: 8
+//   9  overlay card panel, hide-cleared, and labels on the value pages
+SETTINGS_VERSION :: 9
 
 // Which region an integration follows. One of these per integration
 // rather than one shared between them: the OBS tab has a panel per
@@ -163,6 +164,23 @@ Settings :: struct {
 	overlay_next_count: int    `json:"overlay_next_count"`,
 	overlay_bg:         string `json:"overlay_bg"`,         // none | green | magenta
 
+	// The card's own backing. "panel" is the dark rounded box; "none"
+	// draws the text straight onto the scene with a heavy outline instead.
+	// Separate from overlay_bg, which is the chroma-key colour behind the
+	// whole page and only matters when capturing this as a window —
+	// conflating the two is why "Background: Transparent" still left a
+	// dark box on the stream.
+	overlay_card: string `json:"overlay_card"`, // panel | none
+
+	// Summary mode lists every area, cleared ones struck through. On a
+	// full boss list that's 30-odd rows, which overflows any sensibly
+	// sized browser source.
+	overlay_hide_cleared: bool `json:"overlay_hide_cleared"`,
+
+	// Caption above each single-value page. On by default: the pages are
+	// standalone sources now, and a bare "57" on screen says nothing.
+	widget_show_labels: bool `json:"widget_show_labels"`,
+
 	// Per-integration region and look. Each OBS panel owns its own, so no
 	// panel depends on a setting that lives on a different one.
 	browser_region: Region_Choice `json:"browser_region"`,
@@ -256,6 +274,8 @@ default_settings :: proc() -> Settings {
 		overlay_mode        = "summary",
 		overlay_next_count  = 8,
 		overlay_bg          = "none",
+		overlay_card        = "panel",
+		widget_show_labels  = true,
 		browser_region   = {mode = "first"},
 		text_region      = {mode = "first"},
 		ws_region        = {mode = "first"},
@@ -408,6 +428,7 @@ settings_own_strings :: proc(s: ^Settings, allocator := context.allocator) {
 		&s.boss_list,
 		&s.overlay_mode,
 		&s.overlay_bg,
+		&s.overlay_card,
 		&s.last_kill_region,
 		&s.obs_text_dir,
 		&s.theme,
@@ -541,6 +562,13 @@ migrate_settings :: proc(s: ^Settings) {
 		s.browser_look.font_size = OVERLAY_BASE_FONT_PX
 	}
 
+	// v9's labels default on, and a decoded v8 file leaves the bool false.
+	// Nobody chose "off" — the setting didn't exist — and off is what made
+	// the deaths page a number with no word next to it.
+	if s.version < 9 {
+		s.widget_show_labels = true
+	}
+
 	s.version = SETTINGS_VERSION
 }
 
@@ -636,6 +664,10 @@ settings_apply_bounds :: proc(s: ^Settings) {
 	switch s.overlay_bg {
 	case "none", "green", "magenta": // fine
 	case:                            s.overlay_bg = "none"
+	}
+	switch s.overlay_card {
+	case "panel", "none": // fine
+	case:                 s.overlay_card = "panel"
 	}
 	if s.kill_banner_seconds < KILL_BANNER_SECONDS_MIN ||
 	   s.kill_banner_seconds > KILL_BANNER_SECONDS_MAX {

@@ -136,6 +136,25 @@ page updates live over server-sent events — no refresh interval to tune.
 Everything in one box, one source. What most people want, and the cheapest —
 a single browser instance.
 
+The card **fills the browser source**, so the box you drag in OBS is the card
+you see — size the source to the size you want the card.
+
+**Card** chooses what's behind the text:
+
+| | |
+|---|---|
+| **Dark panel** | The rounded box. Easiest to read, but it's a visible box on your scene. |
+| **No panel** | Just the text, with a heavy outline so it survives over gameplay. |
+
+That's a different setting from **Background**, which is the chroma-key colour
+behind the whole page and only matters if you capture this as a *window* rather
+than using a Browser source. Leave Background on Transparent unless you're doing
+that — "Transparent" there has never meant "no panel", which caught me out too.
+
+In summary mode, **Hide cleared areas** drops the areas you've finished. A full
+boss list is over thirty areas, which is more than fits in a sensibly sized
+source — if the bottom of your summary is cut off, this is the fix.
+
 ### Single values
 
 A page per value — progress, attempts, next boss, deaths, session, character,
@@ -143,6 +162,15 @@ region, region bosses — listed as a table with **Copy URL** and **Style…** o
 each row. Each goes into OBS as its own Browser source, for layouts where the
 numbers live in different corners rather than gathered in a card. Add only the
 ones you'll use; each is a browser instance.
+
+Each page draws **flush to the top-left corner**, so crop the source tight to
+the text — a bare number needs very little, while Character or Next boss want
+width for a long name and Region bosses wants height for a list. A source left
+far bigger than its text is what makes these awkward to position.
+
+**Caption above each value** is on by default: "DEATHS" above the number, and so
+on. A bare `57` on a stream tells a viewer nothing. Turn it off if you're drawing
+your own labels in OBS.
 
 The URLs carry nothing but the page's type, and are shown in each page's
 **Style…** dialog rather than in the list — eight of them differing only in the

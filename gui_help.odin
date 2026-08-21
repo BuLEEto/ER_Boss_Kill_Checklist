@@ -66,12 +66,12 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 				"Sources → + → Browser. Give it a name and click OK.",
 			},
 			Help_Step{
-				"Paste the URL",
-				"Put it in the URL field. Set Width and Height to roughly the space you want it to occupy — 500 × 800 suits the summary and next-up modes.",
+				"Paste the URL and size the source",
+				"Put it in the URL field, then set Width and Height to the size you want the card to be — the card fills the source exactly, so the box you drag in OBS is the card you see. 500 × 800 suits summary mode, less for next-up.",
 			},
 			Help_Step{
-				"Leave the background transparent",
-				"The page has no background of its own, so it composites straight over your gameplay. The green and magenta options are only for capturing the page as a window, where you need a chroma key.",
+				"Dark panel, or just the text",
+				"Card chooses between the two. Dark panel is the rounded box behind the text — easier to read, but it's a visible box on your scene. No panel drops it and puts a heavy outline on the text instead, so all your viewers see is the words.\n\nBackground is a different setting and usually wants leaving on Transparent: the page has no background of its own and composites straight over gameplay. Green and magenta are only for capturing the page as a *window*, where you need a chroma key.",
 			},
 			Help_Step{
 				"Position it",
@@ -138,7 +138,7 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 			Help_Step{
 				"Add a Browser source per value",
-				"Sources → + → Browser, paste the URL, and set Width and Height to the space you want it to take. 760 × 90 suits a single number; a list like Region bosses wants more height, around 420.",
+				"Sources → + → Browser, paste the URL, then crop the source down to the text. These pages draw flush to the top-left corner, so a tight box is easy to place — a bare number needs very little, while Character or Next boss need the width for a long name and Region bosses needs the height for a list. Leaving the source far bigger than its text is what makes them awkward to position.",
 			},
 			Help_Step{
 				"Leave the background transparent",
@@ -151,6 +151,10 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			Help_Step{
 				"The URLs never change",
 				"Nothing about how a page looks is carried in its URL — it's all resolved here. So restyling a page reaches OBS on its own, and you never have to re-paste a URL you've already set up.",
+			},
+			Help_Step{
+				"The caption above each value",
+				"\"DEATHS\" above the number, and so on — on by default, because a bare \"57\" on a stream tells a viewer nothing. Turn it off with \"Caption above each value\" if you're drawing your own labels in OBS.",
 			},
 			Help_Step{
 				"Styling them",

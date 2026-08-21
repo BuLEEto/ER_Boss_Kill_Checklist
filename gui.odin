@@ -123,6 +123,9 @@ Slot_Selected :: distinct int
 Boss_List_Selected :: distinct string
 Poll_Rate_Changed :: distinct int
 Show_Deaths_Set :: distinct bool
+Overlay_Card_Selected :: distinct string
+Hide_Cleared_Set :: distinct bool
+Widget_Labels_Set :: distinct bool
 Show_Attempts_Set :: distinct bool
 Show_Session_Set :: distinct bool
 Kill_Banner_Set :: distinct bool
@@ -205,6 +208,9 @@ Msg :: union {
 	Boss_List_Selected,
 	Poll_Rate_Changed,
 	Show_Deaths_Set,
+	Overlay_Card_Selected,
+	Hide_Cleared_Set,
+	Widget_Labels_Set,
 	Show_Attempts_Set,
 	Show_Session_Set,
 	Kill_Banner_Set,
@@ -408,6 +414,24 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		app.settings.show_deaths = bool(v)
 		app_save_settings()
 		out = gui_after_data_change(out)
+
+	case Overlay_Card_Selected:
+		sync.guard(&app.mu)
+		settings_set_string(&app.settings.overlay_card, string(v))
+		app_save_settings()
+		out = gui_theme_changed(out)
+
+	case Hide_Cleared_Set:
+		sync.guard(&app.mu)
+		app.settings.overlay_hide_cleared = bool(v)
+		app_save_settings()
+		out = gui_after_data_change(out)
+
+	case Widget_Labels_Set:
+		sync.guard(&app.mu)
+		app.settings.widget_show_labels = bool(v)
+		app_save_settings()
+		out = gui_theme_changed(out)
 
 	case Show_Attempts_Set:
 		sync.guard(&app.mu)

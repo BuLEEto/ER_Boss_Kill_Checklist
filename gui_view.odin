@@ -139,6 +139,9 @@ ID_THEME_OUTLINE  :: "obs.theme_outline"
 ID_THEME_CSS      :: "obs.theme_css"
 ID_OVERLAY_BG     :: "obs.overlay_bg"
 ID_SHOW_DEATHS    :: "obs.show_deaths"
+ID_OVERLAY_CARD   :: "obs.overlay_card"
+ID_HIDE_CLEARED   :: "obs.hide_cleared"
+ID_WIDGET_LABELS  :: "obs.widget_labels"
 ID_SHOW_ATTEMPTS  :: "obs.show_attempts"
 ID_SHOW_SESSION   :: "obs.show_session"
 ID_KILL_BANNER    :: "obs.kill_banner"
@@ -692,6 +695,17 @@ view_obs_browser :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 
 	for v in view_region_control(ctx, .Browser, "browser.region") do append(&rows, v)
 
+	if app.settings.overlay_mode == "summary" {
+		append(&rows, skald.checkbox(
+			ctx, app.settings.overlay_hide_cleared, "Hide cleared areas",
+			on_hide_cleared, id = skald.hash_id(ID_HIDE_CLEARED),
+		))
+		append(&rows, paragraph(ctx,
+			"Summary lists every area, and a full boss list is over thirty of them — more than fits in any sensible browser source, so the bottom gets cut off. Hiding the ones you've finished usually solves it.",
+			th.color.fg_muted, th.font.size_xs,
+		))
+	}
+
 	append(&rows, skald.checkbox(
 		ctx, app.settings.show_deaths, "Include death count", on_show_deaths,
 		id = skald.hash_id(ID_SHOW_DEATHS),
@@ -731,6 +745,21 @@ view_obs_browser :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	))
 
 	append(&rows, skald.spacer(th.spacing.sm))
+	append(&rows, skald.form_row(ctx, "Card",
+		skald.segmented(
+			ctx, {"Dark panel", "No panel"},
+			app.settings.overlay_card == "none" ? 1 : 0, on_overlay_card,
+			id = skald.hash_id(ID_OVERLAY_CARD),
+		),
+		label_width = 120,
+	))
+	append(&rows, paragraph(ctx,
+		app.settings.overlay_card == "none" \
+			? "Text straight onto the scene, with a heavy outline so it stays readable over gameplay." \
+			: "The dark rounded box behind the text. Switch to No panel if you want just the text over your gameplay — Background below is a different thing, and only matters if you capture this as a window.",
+		th.color.fg_muted, th.font.size_xs,
+	))
+
 	append(&rows, skald.form_row(ctx, "Background",
 		skald.segmented(
 			ctx, {"Transparent", "Green", "Magenta"},
@@ -830,7 +859,7 @@ view_obs_widgets :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 				width = NAME_W,
 			),
 			skald.flex(1, skald.text(
-				widget_example(kind), th.color.fg_muted, th.font.size_xs,
+				widget_preview(kind), th.color.fg_muted, th.font.size_xs,
 			)),
 			skald.col(badge, width = BADGE_W),
 			skald.button(ctx, "Copy URL",
@@ -842,6 +871,15 @@ view_obs_widgets :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 			cross_align = .Center,
 		))
 	}
+
+	append(&rows, skald.checkbox(
+		ctx, app.settings.widget_show_labels, "Caption above each value",
+		on_widget_labels, id = skald.hash_id(ID_WIDGET_LABELS),
+	))
+	append(&rows, paragraph(ctx,
+		"\"DEATHS\" above the number, and so on. Turn it off if you're drawing your own labels in OBS — but a bare number on its own says nothing to a viewer.",
+		th.color.fg_muted, th.font.size_xs,
+	))
 
 	append(&rows, skald.spacer(th.spacing.sm))
 	for v in view_region_control(ctx, .Widget, "widget.region") do append(&rows, v)
@@ -1231,6 +1269,11 @@ on_boss_list_selected :: proc(label: string) -> Msg {
 
 on_poll_rate :: proc(v: f32) -> Msg { return Poll_Rate_Changed(int(v + 0.5)) }
 on_show_deaths :: proc(v: bool) -> Msg { return Show_Deaths_Set(v) }
+on_hide_cleared :: proc(v: bool) -> Msg { return Hide_Cleared_Set(v) }
+on_widget_labels :: proc(v: bool) -> Msg { return Widget_Labels_Set(v) }
+on_overlay_card :: proc(i: int) -> Msg {
+	return Overlay_Card_Selected(i == 1 ? "none" : "panel")
+}
 on_show_attempts :: proc(v: bool) -> Msg { return Show_Attempts_Set(v) }
 on_show_session :: proc(v: bool) -> Msg { return Show_Session_Set(v) }
 on_kill_banner :: proc(v: bool) -> Msg { return Kill_Banner_Set(v) }

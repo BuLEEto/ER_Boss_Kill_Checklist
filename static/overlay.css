@@ -46,7 +46,13 @@ body.align-right .boss-item { padding: 4px 8px 4px 0; }
      * together instead of leaving a big font in a small box.
      * overlay_theme_css overrides this px value. */
     font-size: 13px;
-    width: 24.6em;
+
+    /* Fills the browser source rather than sitting at a fixed 320px
+     * inside it. A source wider than its card is the thing that makes
+     * resizing in OBS feel wrong: you drag a box with dead space in it and
+     * the visible card doesn't follow. Full width means the source
+     * rectangle IS the card — set the source to the size you want. */
+    width: 100%;
     padding: 0.77em 0.92em;
     background: rgba(20, 20, 20, 0.88);
     border: 1px solid rgba(200, 168, 78, 0.3);
@@ -54,6 +60,10 @@ body.align-right .boss-item { padding: 4px 8px 4px 0; }
     text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
 }
 
+/* No panel: text straight onto the scene. Same treatment the chroma-key
+ * modes get, because the problem is identical — nothing behind the text,
+ * so it needs an outline of its own to stay readable over gameplay. */
+body.card-none .overlay,
 body.bg-green .overlay,
 body.bg-magenta .overlay {
     background: transparent;
@@ -75,6 +85,7 @@ body.bg-magenta .overlay {
          0    0  10px #000;
 }
 
+body.card-none .summary-count,
 body.bg-green .summary-count,
 body.bg-magenta .summary-count {
     color: #ffdd44;
@@ -84,6 +95,7 @@ body.bg-magenta .summary-count {
 }
 
 
+body.card-none .overlay-header,
 body.bg-green .overlay-header,
 body.bg-magenta .overlay-header {
     border-bottom-color: transparent;
@@ -248,7 +260,10 @@ body.widget.align-center { text-align: center; }
 
 .widget-box {
     display: block;
-    padding: 2px 4px;
+    /* Flush to the corner. These get their own browser source, and any
+     * padding here is dead space you can't see but still have to drag
+     * around in OBS — so the source can be cropped tight to the text. */
+    padding: 0;
 }
 
 .widget-label {
