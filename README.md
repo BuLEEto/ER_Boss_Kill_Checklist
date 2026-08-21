@@ -20,8 +20,8 @@ beaten — safe to use with EAC.
 - **Session totals** — bosses and deaths for this sitting
 - **Boss defeated banner** — the overlay names the boss for a few seconds when
   it dies
-- Remembers your setup — save file, character, boss list, window size, theme —
-  between restarts
+- Remembers your setup — save file, character, boss list, window size, theme,
+  and which tab you were on — between restarts
 - Elden Ring colour theme by default (Dark, Light and follow-the-OS also
   available), with an adjustable text size
 - **Two ways into OBS**:
@@ -139,14 +139,16 @@ a single browser instance.
 ### Single values
 
 A page per value — progress, attempts, next boss, deaths, session, character,
-region, region bosses — each with a Copy button, each added to OBS as its own
-Browser source. For layouts where the numbers live in different corners rather
-than gathered in a card. Add only the ones you'll use; each is a browser
-instance.
+region, region bosses — listed as a table with **Copy URL** and **Style…** on
+each row. Each goes into OBS as its own Browser source, for layouts where the
+numbers live in different corners rather than gathered in a card. Add only the
+ones you'll use; each is a browser instance.
 
-The URLs carry nothing but the page's type. Everything about how a page looks
-is resolved by the app, so restyling reaches a source that's already in OBS on
-its own — you never re-paste a URL you've already set up.
+The URLs carry nothing but the page's type, and are shown in each page's
+**Style…** dialog rather than in the list — eight of them differing only in the
+last word is a column of noise. Everything about how a page looks is resolved by
+the app, so restyling reaches a source that's already in OBS on its own; you
+never re-paste a URL you've already set up.
 
 **Styling one on its own.** *Appearance* at the bottom of the panel styles every
 page at once. To make one different, press **Style…** on its row and tick *Style

@@ -792,46 +792,56 @@ view_obs_widgets :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	}
 
 	append(&rows, skald.section_header(ctx, "Pages"))
+	append(&rows, paragraph(ctx,
+		"Each one you add is a browser instance in OBS, so take only what you'll use. The URLs never change — restyling a page reaches OBS on its own, with nothing to re-paste. Style… shows a page's URL as well as its look.",
+		th.color.fg_muted, th.font.size_xs,
+	))
+
+	// One row per page. The URL itself isn't shown: eight of them differ
+	// only in the last word, so listing them in full was a column of
+	// near-identical noise twice the height of the list it belonged to.
+	// Copy is what people actually want, and the URL is spelled out in
+	// this page's own Style dialog for anyone who wants to read it.
+	// Built as a row of fixed-width columns rather than with form_row.
+	//
+	// form_row doesn't wrap its control in a flex, so the control area is
+	// content-sized — which means a flex spacer inside it has nothing to
+	// expand into, and the buttons end up wherever the description text
+	// happens to finish. Eight rows of that is a staircase, not a table.
+	// Here the outer row is a direct child of a stretched column, so the
+	// flex has a definite width to work with and the buttons land in the
+	// same place on every row.
+	NAME_W   :: f32(150)
+	BADGE_W  :: f32(64)
+
 	for kind in Widget_Kind {
 		custom := settings_widget_look(kind).custom
 
-		append(&rows, skald.col(
-			skald.row(
-				skald.col(
-					skald.text(widget_label(kind), th.color.fg, th.font.size_sm),
-					skald.text(widget_example(kind), th.color.fg_muted, th.font.size_xs),
-					spacing = 0,
-				),
-				skald.flex(1, skald.spacer(0)),
-				skald.text(
-					custom ? "Styled on its own" : "Shared style",
-					custom ? th.color.primary : th.color.fg_muted,
-					th.font.size_xs,
-				),
-				skald.button(ctx, "Style…", Msg(Widget_Style_Opened(kind)),
-					id = skald.hash_id(fmt.tprintf("widget.style.%s", widget_slug(kind)))),
-				spacing     = th.spacing.sm,
-				cross_align = .Center,
+		// Fixed-width even when empty, so a customised row doesn't shove
+		// its buttons out of line with the rest.
+		badge := skald.spacer(0)
+		if custom {
+			badge = skald.text("Custom", th.color.primary, th.font.size_xs)
+		}
+
+		append(&rows, skald.row(
+			skald.col(
+				skald.text(widget_label(kind), th.color.fg, th.font.size_sm),
+				width = NAME_W,
 			),
-			skald.row(
-				skald.flex(1, skald.text_selectable(
-					ctx, widget_url_string(kind, context.temp_allocator),
-					th.color.fg_muted, th.font.size_xs,
-				), min_main = 200),
-				skald.button(ctx, "Copy",
-					Msg(Copy_Requested(widget_url_string(kind, context.temp_allocator)))),
-				spacing     = th.spacing.sm,
-				cross_align = .Center,
-			),
-			spacing     = th.spacing.xs,
-			cross_align = .Stretch,
+			skald.flex(1, skald.text(
+				widget_example(kind), th.color.fg_muted, th.font.size_xs,
+			)),
+			skald.col(badge, width = BADGE_W),
+			skald.button(ctx, "Copy URL",
+				Msg(Copy_Requested(widget_url_string(kind, context.temp_allocator))),
+				id = skald.hash_id(fmt.tprintf("widget.copy.%s", widget_slug(kind)))),
+			skald.button(ctx, "Style…", Msg(Widget_Style_Opened(kind)),
+				id = skald.hash_id(fmt.tprintf("widget.style.%s", widget_slug(kind)))),
+			spacing     = th.spacing.sm,
+			cross_align = .Center,
 		))
 	}
-
-	append(&rows, paragraph(ctx,
-		"Each is a browser instance in OBS, so add only the ones you'll use. The URLs never change — everything about how a page looks is resolved here, so restyling one updates it live without re-pasting anything.",
-		th.color.fg_muted, th.font.size_xs,
-	))
 
 	append(&rows, skald.spacer(th.spacing.sm))
 	for v in view_region_control(ctx, .Widget, "widget.region") do append(&rows, v)
@@ -940,6 +950,15 @@ view_widget_style_dialog :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	custom := settings_widget_look(kind).custom
 
 	body := make([dynamic]skald.View, context.temp_allocator)
+
+	// The URL lives here rather than on the list. It's the one place it's
+	// unambiguous which page it belongs to, and it keeps eight rows of
+	// near-identical text off the panel.
+	append(&body, view_copy_row(
+		ctx, "URL", widget_url_string(kind, context.temp_allocator),
+	))
+	append(&body, skald.spacer(th.spacing.sm))
+
 	append(&body, skald.checkbox(
 		ctx, custom, "Style this page on its own",
 		kind, on_widget_custom_set,

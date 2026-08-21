@@ -226,6 +226,14 @@ Settings :: struct {
 	window_w:         int    `json:"window_w"`,
 	window_h:         int    `json:"window_h"`,
 	window_maximized: bool   `json:"window_maximized"`,
+	// Where you were last time. The app already remembers the window, the
+	// theme, the save and the boss list; coming back to the Setup tab you
+	// were part-way through is the same courtesy. Stored as ints because
+	// the tab enums are a GUI concern, and settings shouldn't depend on
+	// them — bounds-checked against the real enums on the way in.
+	last_tab:     int `json:"last_tab"`,
+	last_obs_tab: int `json:"last_obs_tab"`,
+
 	theme:            string `json:"theme"`,           // elden | dark | light | system
 	ui_scale:         f32    `json:"ui_scale"`,        // text + spacing multiplier
 	hide_completed:   bool   `json:"hide_completed"`,
@@ -640,6 +648,8 @@ settings_apply_bounds :: proc(s: ^Settings) {
 		s.attempts_base = 0
 	}
 	if s.attempts_base < 0 do s.attempts_base = 0
+	if s.last_tab < 0 || s.last_tab >= len(Tab) do s.last_tab = 0
+	if s.last_obs_tab < 0 || s.last_obs_tab >= len(Obs_Tab) do s.last_obs_tab = 0
 
 	region_choice_apply_bounds(&s.browser_region)
 	region_choice_apply_bounds(&s.text_region)

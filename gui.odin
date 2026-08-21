@@ -253,7 +253,15 @@ Msg :: union {
 
 gui_init :: proc() -> Gui {
 	g: Gui
-	g.tab = app.settings.save_path == "" ? .Setup : .Checklist
+	// Nothing set up yet means Setup regardless of where you last were —
+	// there's nothing to look at on the other tabs, and the first run
+	// should point at the one thing that needs doing.
+	if app.settings.save_path == "" {
+		g.tab = .Setup
+	} else {
+		g.tab = Tab(app.settings.last_tab)
+	}
+	g.obs_tab = Obs_Tab(app.settings.last_obs_tab)
 	g.win = saved_window_state()
 
 	g.port_draft         = fmt.aprintf("%d", app.settings.server_port)
@@ -293,9 +301,15 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 
 	case Tab_Selected:
 		out.tab = Tab(int(v))
+		sync.guard(&app.mu)
+		app.settings.last_tab = int(v)
+		app_save_settings()
 
 	case Obs_Tab_Selected:
 		out.obs_tab = Obs_Tab(int(v))
+		sync.guard(&app.mu)
+		app.settings.last_obs_tab = int(v)
+		app_save_settings()
 
 	case Tick:
 		// Nothing to poll, or a poll is already in flight — just come
