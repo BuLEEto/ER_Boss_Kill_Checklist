@@ -11440,25 +11440,39 @@ scroll_advance :: proc(
 	// Nested-scroll wheel routing: only the *innermost* hovered scrollable
 	// viewport eats the wheel delta; outer scrollers pass. We consult the
 	// previous frame's stamp list (one-frame lag is imperceptible for wheel
-	// UX and avoids a second render pass). Iterating backwards picks the
-	// deepest rect first — it's the one that was stamped most recently in
-	// last frame's render walk, which for a properly-nested tree is the
-	// innermost scroller at the mouse position.
+	// UX and avoids a second render pass).
+	//
+	// LOCAL PATCH (see PATCHES.md): innermost is decided by the smallest
+	// viewport under the cursor, not by stamp order.
+	//
+	// Stamp order was the wrong proxy. It only runs outer -> inner when
+	// every scroller in the chain resolves at the same stage, and a
+	// fill-mode scroll — scroll(ctx, {0,0}, ...) — doesn't: it defers
+	// through `sized`, so its scroll_advance runs during layout, after an
+	// inner fixed-size scroll built as one of its own arguments has
+	// already stamped. The list then reads inner -> outer, the backwards
+	// scan found the OUTER rect first, and the inner scroller never
+	// claimed. That is a combobox dropdown inside a scrolling page: the
+	// dropdown's wheel was dead and the page behind it scrolled instead.
+	//
+	// Area is order-independent and needs no depth plumbing. Nested
+	// viewports strictly contain one another, so the inner one is the
+	// smaller; siblings don't overlap, so at most one contains the point.
 	claim_wheel := false
 	if hovered && scrollable && ctx.input.scroll.y != 0 {
-		found := false
-		for i := len(ctx.widgets.scroll_rects_prev) - 1; i >= 0; i -= 1 {
-			cand := ctx.widgets.scroll_rects_prev[i]
-			if rect_contains_point(cand.rect, ctx.input.mouse_pos) {
-				claim_wheel = cand.id == id
-				found = true
-				break
+		best_id: Widget_ID
+		best_area := max(f32)
+		for cand in ctx.widgets.scroll_rects_prev {
+			if !rect_contains_point(cand.rect, ctx.input.mouse_pos) { continue }
+			area := cand.rect.w * cand.rect.h
+			if area < best_area {
+				best_area = area
+				best_id   = cand.id
 			}
 		}
-		// Fallback for the very first frame (no prev stamps yet): let the
-		// outer-most hovered scroller claim, so a plain single-scroll page
-		// isn't inert on frame 1.
-		if !found { claim_wheel = true }
+		// No stamps yet (very first frame): let the hovered scroller claim,
+		// so a plain single-scroll page isn't inert on frame 1.
+		claim_wheel = best_id == 0 || best_id == id
 	}
 
 	if claim_wheel {
