@@ -36,6 +36,12 @@ App_State :: struct {
 	death_count: u32,
 	save_loaded: bool,
 
+	// Counters for this run of the app. Deliberately not persisted — a
+	// "session" is one sitting, and a number that survived a restart would
+	// be measuring something the streamer didn't ask for.
+	session_deaths: int,
+	session_bosses: int,
+
 	// Last thing that went wrong loading a save, for display in the GUI.
 	// Empty when all is well.
 	save_error: string,
@@ -290,6 +296,19 @@ app_apply_settings :: proc(s: Settings) {
 	if len(app.settings.save_path) > 0 {
 		app_reload_save()
 	}
+
+	// Seed the attempts bookmark when this character hasn't got one — a
+	// fresh install, or a settings file written before the counter
+	// existed. Startup restores active_slot straight out of settings
+	// rather than going through app_set_active_slot, so without this the
+	// counter would sit at "—" until the user changed character.
+	//
+	// After app_reload_save, necessarily: the bookmark is a death count,
+	// and there isn't one until the save has been read.
+	if app.save_loaded && app.settings.active_slot >= 0 &&
+	   app.settings.attempts_slot != app.settings.active_slot {
+		app_reset_attempts()
+	}
 }
 
 app_set_save_path :: proc(path: string) {
@@ -302,6 +321,51 @@ app_set_save_path :: proc(path: string) {
 app_set_active_slot :: proc(slot: int) {
 	app.settings.active_slot = slot
 	app_update_boss_status()
+
+	// Give this character an attempts bookmark if it hasn't got one, so
+	// the counter starts from zero rather than from whatever the last
+	// character was on. Only when it doesn't already match: rebasing
+	// unconditionally would reset the count on every launch, and surviving
+	// a launch is most of the point.
+	if app.settings.attempts_slot != slot {
+		app_reset_attempts()
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Attempts
+// ----------------------------------------------------------------------------
+
+// Deaths since the last boss this app watched fall.
+//
+// The arithmetic is exact — both halves come straight out of the save.
+// What it is *not* is a per-boss death count: Elden Ring doesn't store
+// one. A death to a fall, a mob, or an invader lands here exactly like a
+// death to the boss, so this is "deaths since your last kill" and is only
+// an attempt count while someone is actually fighting something.
+//
+// ok is false when there's nothing meaningful to show: no save, no
+// character, a bookmark belonging to a different character, or a death
+// count that went backwards because a backup was restored.
+app_attempts :: proc() -> (n: int, ok: bool) {
+	if !app.save_loaded || app.settings.active_slot < 0 do return 0, false
+	if app.settings.attempts_slot != app.settings.active_slot do return 0, false
+
+	d := int(app.death_count) - app.settings.attempts_base
+	if d < 0 do return 0, false
+	return d, true
+}
+
+// Re-bookmark so the counter reads zero from here. Called when a boss
+// falls, when the character changes, and from the Reset button.
+app_reset_attempts :: proc() {
+	app.settings.attempts_slot = app.settings.active_slot
+	app.settings.attempts_base = int(app.death_count)
+}
+
+app_reset_session :: proc() {
+	app.session_deaths = 0
+	app.session_bosses = 0
 }
 
 // Persist the current settings, reporting failure rather than swallowing

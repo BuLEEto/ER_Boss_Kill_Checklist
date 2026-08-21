@@ -121,6 +121,13 @@ Slot_Selected :: distinct int
 Boss_List_Selected :: distinct string
 Poll_Rate_Changed :: distinct int
 Show_Deaths_Set :: distinct bool
+Show_Attempts_Set :: distinct bool
+Show_Session_Set :: distinct bool
+Kill_Banner_Set :: distinct bool
+Kill_Banner_Secs :: distinct int
+Attempts_Reset :: struct {}
+Session_Reset :: struct {}
+Obsws_Scene_Selected :: distinct string
 Hide_Completed_Set :: distinct bool
 Theme_Selected :: distinct string
 Ui_Scale_Selected :: distinct f32
@@ -205,6 +212,13 @@ Msg :: union {
 	Boss_List_Selected,
 	Poll_Rate_Changed,
 	Show_Deaths_Set,
+	Show_Attempts_Set,
+	Show_Session_Set,
+	Kill_Banner_Set,
+	Kill_Banner_Secs,
+	Attempts_Reset,
+	Session_Reset,
+	Obsws_Scene_Selected,
 	Hide_Completed_Set,
 	Theme_Selected,
 	Ui_Scale_Selected,
@@ -404,6 +418,64 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		sync.guard(&app.mu)
 		app.settings.show_deaths = bool(v)
 		app_save_settings()
+		out = gui_after_data_change(out)
+
+	case Show_Attempts_Set:
+		sync.guard(&app.mu)
+		app.settings.show_attempts = bool(v)
+		app_save_settings()
+		out = gui_after_data_change(out)
+
+	case Show_Session_Set:
+		sync.guard(&app.mu)
+		app.settings.show_session = bool(v)
+		app_save_settings()
+		out = gui_after_data_change(out)
+
+	case Kill_Banner_Set:
+		sync.guard(&app.mu)
+		app.settings.kill_banner_enabled = bool(v)
+		app_save_settings()
+
+	case Kill_Banner_Secs:
+		sync.guard(&app.mu)
+		app.settings.kill_banner_seconds = clamp(
+			int(v), KILL_BANNER_SECONDS_MIN, KILL_BANNER_SECONDS_MAX,
+		)
+		app_save_settings()
+
+	case Attempts_Reset:
+		sync.guard(&app.mu)
+		app_reset_attempts()
+		app_save_settings()
+		out = gui_after_data_change(out)
+		out = gui_toast(out, "Attempt counter reset", .Success)
+
+	case Session_Reset:
+		sync.guard(&app.mu)
+		app_reset_session()
+		out = gui_after_data_change(out)
+		out = gui_toast(out, "Session counters reset", .Success)
+
+	case Obsws_Scene_Selected:
+		sync.guard(&app.mu)
+		scene := string(v)
+		// The sentinel is a label, not a scene name. Store it as empty so
+		// "follow whatever's live" keeps meaning that even if OBS gains a
+		// scene actually called that.
+		if scene == OBSWS_SCENE_CURRENT_LABEL do scene = ""
+		if scene == app.settings.obsws_scene do return out, {}
+
+		settings_set_string(&app.settings.obsws_scene, scene)
+		app_save_settings()
+		if !app.settings.obsws_enabled do return out, {}
+
+		// Moving sources needs request/response traffic, and once we're
+		// connected the reader thread owns the socket — two threads in
+		// ws.receive on one connection is a race. Reconnecting gets a
+		// clean run at it through the path that already does this, and
+		// picking a scene is a once-in-a-setup action.
+		return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
 
 	case Hide_Completed_Set:
 		sync.guard(&app.mu)
@@ -596,6 +668,8 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		case .Character:     app.settings.obsws_send_character = v.on
 		case .Region:        app.settings.obsws_send_region = v.on
 		case .Region_Bosses: app.settings.obsws_send_region_bosses = v.on
+		case .Attempts:      app.settings.obsws_send_attempts = v.on
+		case .Session:       app.settings.obsws_send_session = v.on
 		case .Overlay:       app.settings.obsws_send_overlay = v.on
 		}
 		app_save_settings()
@@ -965,6 +1039,15 @@ apply_poll_result :: proc(s: Gui, r: Poll_Done) -> Gui {
 	changed := app.death_count != old_deaths
 	newly_killed := 0
 
+	// What fell this poll, for the overlay banner. Usually one name; a
+	// save that changed while the app was closed can bring in several.
+	//
+	// The diff below is only ever this poll's doing: every path that
+	// changes the character, the save file or the boss list recomputes the
+	// kill flags before it returns, so the snapshot taken above already
+	// reflects them. Nothing else can look like a kill.
+	killed_names := make([dynamic]string, context.temp_allocator)
+
 	// Which area saw the most new kills this poll. Usually one boss in
 	// one area, but a save that changed while the app was closed can
 	// bring in several at once — the busiest area is the better guess at
@@ -981,6 +1064,7 @@ apply_poll_result :: proc(s: Gui, r: Poll_Done) -> Gui {
 				if b.killed {
 					newly_killed += 1
 					region_kills += 1
+					append(&killed_names, b.boss)
 				}
 			}
 		}
@@ -990,11 +1074,30 @@ apply_poll_result :: proc(s: Gui, r: Poll_Done) -> Gui {
 		}
 	}
 
-	if best_count > 0 && app_note_kill_region(best_region) {
-		app_save_settings()
+	// Session counters, from this poll's diff only — so a character switch
+	// between polls can't leak into them.
+	if app.death_count > old_deaths {
+		app.session_deaths += int(app.death_count - old_deaths)
 	}
+	app.session_bosses += newly_killed
+
+	settings_dirty := best_count > 0 && app_note_kill_region(best_region)
+
+	// A kill is what the attempts counter measures from. Rebase before the
+	// write below so the region note and the new bookmark land together.
+	if newly_killed > 0 {
+		app_reset_attempts()
+		settings_dirty = true
+	}
+	if settings_dirty do app_save_settings()
 
 	if !changed do return out
+
+	// Banner before data. The overlay holds its reload until the banner
+	// has played, which it can only do if it hears about the kill first.
+	if newly_killed > 0 && app.settings.kill_banner_enabled {
+		sse_broadcast_kill(killed_names[:])
+	}
 
 	out = gui_after_data_change(out)
 	if newly_killed > 0 {

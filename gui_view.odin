@@ -140,6 +140,11 @@ ID_THEME_OUTLINE  :: "obs.theme_outline"
 ID_THEME_CSS      :: "obs.theme_css"
 ID_OVERLAY_BG     :: "obs.overlay_bg"
 ID_SHOW_DEATHS    :: "obs.show_deaths"
+ID_SHOW_ATTEMPTS  :: "obs.show_attempts"
+ID_SHOW_SESSION   :: "obs.show_session"
+ID_KILL_BANNER    :: "obs.kill_banner"
+ID_BANNER_SECS    :: "obs.banner_secs"
+ID_WS_SCENE       :: "obs.ws_scene"
 ID_TEXT_TOGGLE    :: "obs.text_enabled"
 ID_TEXT_DIR       :: "obs.text_dir"
 ID_WS_TOGGLE      :: "obs.ws_enabled"
@@ -148,6 +153,8 @@ ID_WS_PORT        :: "obs.ws_port"
 ID_WS_PASS        :: "obs.ws_pass"
 ID_WS_REMEMBER    :: "obs.ws_remember"
 ID_HIDE_COMPLETED :: "checklist.hide_completed"
+ID_RESET_ATTEMPTS :: "checklist.reset_attempts"
+ID_RESET_SESSION  :: "checklist.reset_session"
 
 // ----------------------------------------------------------------------------
 // Setup tab
@@ -467,6 +474,18 @@ view_checklist :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 			skald.text(boss_list_label(app.boss_list_type), th.color.fg_muted, th.font.size_sm),
 			cross_align = .Center,
 		),
+		// The two counters the OBS sources publish, where someone can see
+		// what's actually going out and put either one back to zero.
+		skald.row(
+			skald.text(counters_text(), th.color.fg_muted, th.font.size_sm),
+			skald.flex(1, skald.spacer(0)),
+			skald.button(ctx, "Reset attempts", Msg(Attempts_Reset{}),
+				id = skald.hash_id(ID_RESET_ATTEMPTS)),
+			skald.button(ctx, "Reset session", Msg(Session_Reset{}),
+				id = skald.hash_id(ID_RESET_SESSION)),
+			spacing     = th.spacing.sm,
+			cross_align = .Center,
+		),
 		spacing     = th.spacing.xs,
 		cross_align = .Stretch,
 	)
@@ -684,6 +703,39 @@ view_obs_browser :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		ctx, app.settings.show_deaths, "Include death count", on_show_deaths,
 		id = skald.hash_id(ID_SHOW_DEATHS),
 	))
+	append(&rows, skald.checkbox(
+		ctx, app.settings.show_attempts, "Include attempt counter", on_show_attempts,
+		id = skald.hash_id(ID_SHOW_ATTEMPTS),
+	))
+	append(&rows, skald.checkbox(
+		ctx, app.settings.show_session, "Include session totals", on_show_session,
+		id = skald.hash_id(ID_SHOW_SESSION),
+	))
+
+	append(&rows, skald.spacer(th.spacing.sm))
+	append(&rows, skald.section_header(ctx, "Boss defeated banner"))
+	append(&rows, skald.checkbox(
+		ctx, app.settings.kill_banner_enabled,
+		"Announce kills on the overlay", on_kill_banner,
+		id = skald.hash_id(ID_KILL_BANNER),
+	))
+	if app.settings.kill_banner_enabled {
+		append(&rows, skald.form_row(ctx,
+			fmt.tprintf("Hold %d seconds", app.settings.kill_banner_seconds),
+			skald.slider(
+				ctx, f32(app.settings.kill_banner_seconds), on_kill_banner_secs,
+				min_value = f32(KILL_BANNER_SECONDS_MIN),
+				max_value = f32(KILL_BANNER_SECONDS_MAX),
+				step = 1, width = 220,
+				id = skald.hash_id(ID_BANNER_SECS),
+			),
+			label_width = 120,
+		))
+	}
+	append(&rows, paragraph(ctx,
+		"Names the boss on the overlay for a few seconds, then goes back to the numbers. It sits at the bottom of the browser source, so give that source some height below the card or the two will overlap. Only the overlay can do this — a text source has nowhere to put it. Uses this panel's Appearance colours.",
+		th.color.fg_muted, th.font.size_xs,
+	))
 
 	append(&rows, skald.spacer(th.spacing.sm))
 	append(&rows, skald.form_row(ctx, "Background",
@@ -828,6 +880,38 @@ view_obs_websocket :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	case .Connecting, .Disconnected: // muted
 	}
 	append(&rows, skald.text(status, status_colour, th.font.size_sm))
+
+	// Scene picker. Populated from OBS, so it only has real names once
+	// we've connected at least once — before that the sentinel is the
+	// only honest option to offer.
+	scenes := obsws_scene_names()
+	scene_options := make([dynamic]string, context.temp_allocator)
+	append(&scene_options, OBSWS_SCENE_CURRENT_LABEL)
+	for sc in scenes do append(&scene_options, sc)
+
+	current_scene := len(app.settings.obsws_scene) > 0 \
+		? app.settings.obsws_scene \
+		: OBSWS_SCENE_CURRENT_LABEL
+
+	append(&rows, skald.spacer(th.spacing.sm))
+	append(&rows, skald.form_row(ctx, "Add to scene",
+		skald.select(
+			ctx, current_scene, scene_options[:], on_obsws_scene,
+			width = 280, id = skald.hash_id(ID_WS_SCENE),
+		),
+		label_width = 120,
+	))
+	if len(scenes) == 0 {
+		append(&rows, paragraph(ctx,
+			"Connect once and your scenes will be listed here.",
+			th.color.fg_muted, th.font.size_xs,
+		))
+	} else {
+		append(&rows, paragraph(ctx,
+			"Where new sources are created. Leave it on the default and they land in whichever scene happens to be live when the app connects — which is fine until that's your Starting Soon scene. Changing this reconnects and adds the sources to the scene you pick.",
+			th.color.fg_muted, th.font.size_xs,
+		))
+	}
 
 	append(&rows, skald.spacer(th.spacing.sm))
 	append(&rows, skald.section_header(ctx, "Sources"))
@@ -1009,6 +1093,14 @@ mobile_url_string :: proc(allocator := context.allocator) -> string {
 // Small view helpers
 // ----------------------------------------------------------------------------
 
+// The attempts and session line under the checklist progress bar.
+counters_text :: proc() -> string {
+	session := fmt.tprintf("Session: %s", session_summary())
+	n, ok := app_attempts()
+	if !ok do return session
+	return fmt.tprintf("Attempt %d  ·  %s", n, session)
+}
+
 boss_list_labels :: proc() -> []string {
 	out := make([]string, len(Boss_List_Type), context.temp_allocator)
 	for t, i in Boss_List_Type {
@@ -1072,6 +1164,11 @@ on_boss_list_selected :: proc(label: string) -> Msg {
 
 on_poll_rate :: proc(v: f32) -> Msg { return Poll_Rate_Changed(int(v + 0.5)) }
 on_show_deaths :: proc(v: bool) -> Msg { return Show_Deaths_Set(v) }
+on_show_attempts :: proc(v: bool) -> Msg { return Show_Attempts_Set(v) }
+on_show_session :: proc(v: bool) -> Msg { return Show_Session_Set(v) }
+on_kill_banner :: proc(v: bool) -> Msg { return Kill_Banner_Set(v) }
+on_kill_banner_secs :: proc(v: f32) -> Msg { return Kill_Banner_Secs(int(v + 0.5)) }
+on_obsws_scene :: proc(label: string) -> Msg { return Obsws_Scene_Selected(label) }
 on_hide_completed :: proc(v: bool) -> Msg { return Hide_Completed_Set(v) }
 
 on_theme_selected :: proc(label: string) -> Msg {

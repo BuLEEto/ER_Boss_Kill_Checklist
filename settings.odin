@@ -35,6 +35,10 @@ SETTINGS_FILE :: "settings.json"
 // kill any sooner, it just offers precision the game doesn't provide.
 // Each poll is an mtime check; the 25 MB read only happens when that
 // changed.
+KILL_BANNER_SECONDS_MIN     :: 2
+KILL_BANNER_SECONDS_MAX     :: 30
+KILL_BANNER_SECONDS_DEFAULT :: 6
+
 POLL_SECONDS_MIN :: 5
 POLL_SECONDS_MAX :: 60
 POLL_SECONDS_DEFAULT :: 5
@@ -50,7 +54,7 @@ POLL_SECONDS_DEFAULT :: 5
 //   4  region pinned by name rather than index; per-source obsws toggles
 //   5  region selection grew a mode, so "pinned" is distinct from "auto"
 //   6  region and appearance are per-integration rather than shared
-SETTINGS_VERSION :: 6
+SETTINGS_VERSION :: 7
 
 // Which region an integration follows. One of these per integration
 // rather than one shared between them: the OBS tab has a panel per
@@ -81,6 +85,19 @@ Appearance :: struct {
 	font_size:   int    `json:"font_size"`,
 	outline:     bool   `json:"outline"`,
 	align:       string `json:"align"`, // left | center | right
+}
+
+// The overlay card's natural text size. Everything inside the card is
+// sized in em from here, so this is the one number that scales it.
+OVERLAY_BASE_FONT_PX :: 13
+
+// A widget source is one value standing alone on the canvas, so it starts
+// big. The overlay card is a panel of many lines, so it starts at reading
+// size — same control, two sensible defaults.
+default_browser_appearance :: proc() -> Appearance {
+	a := default_appearance()
+	a.font_size = OVERLAY_BASE_FONT_PX
+	return a
 }
 
 default_appearance :: proc() -> Appearance {
@@ -119,7 +136,9 @@ Settings :: struct {
 	save_path:    string `json:"save_path"`,
 	active_slot:  int    `json:"active_slot"`,
 	boss_list:    string `json:"boss_list"`,
-	show_deaths:  bool   `json:"show_deaths"`,
+	show_deaths:   bool  `json:"show_deaths"`,
+	show_attempts: bool  `json:"show_attempts"`,
+	show_session:  bool  `json:"show_session"`,
 	poll_seconds: int    `json:"poll_seconds"`,
 
 	// Web server — serves the OBS overlay and the mobile companion page
@@ -157,6 +176,12 @@ Settings :: struct {
 	obsws_port:              int    `json:"obsws_port"`,
 	obsws_remember_password: bool   `json:"obsws_remember_password"`,
 
+	// Which scene new sources are created in. Empty means "whatever is
+	// live when we connect", which is what the app used to do
+	// unconditionally — and which quietly dropped sources into whichever
+	// scene happened to be on air at the time, Starting Soon included.
+	obsws_scene: string `json:"obsws_scene"`,
+
 	// Which of the six text sources the app creates and updates in OBS.
 	// Named individually rather than packed into a bitmask so the file
 	// stays legible — this is a config someone might open and edit.
@@ -166,6 +191,8 @@ Settings :: struct {
 	obsws_send_character:     bool `json:"obsws_send_character"`,
 	obsws_send_region:        bool `json:"obsws_send_region"`,
 	obsws_send_region_bosses: bool `json:"obsws_send_region_bosses"`,
+	obsws_send_attempts:      bool `json:"obsws_send_attempts"`,
+	obsws_send_session:       bool `json:"obsws_send_session"`,
 
 	// The overlay page itself, as a browser source. Off by default: it
 	// overlaps what the individual sources show, so having both appear
@@ -191,6 +218,23 @@ Settings :: struct {
 	// src/libs/sbcrypto. Held in memory decrypted.
 	obsws_password:          string `json:"obsws_password_enc"`,
 
+	// ---- Attempts ------------------------------------------------------
+	//
+	// Deaths since the last boss we watched fall. The save records the
+	// total death count and which bosses are dead; it never records how
+	// those two line up, so this bookmark is the only way to turn one into
+	// the other. See app_attempts for what that does and doesn't mean.
+	//
+	// Bookmarked per slot, because a death count belongs to a character —
+	// without the slot, switching character would subtract one Tarnished's
+	// deaths from another's and print nonsense.
+	attempts_slot: int `json:"attempts_slot"`, // -1 when nothing is bookmarked
+	attempts_base: int `json:"attempts_base"`, // death count at the last kill
+
+	// Boss-defeated banner on the overlay browser source.
+	kill_banner_enabled: bool `json:"kill_banner_enabled"`,
+	kill_banner_seconds: int  `json:"kill_banner_seconds"`,
+
 	// GUI
 	window_x:         int    `json:"window_x"`,
 	window_y:         int    `json:"window_y"`,
@@ -208,7 +252,9 @@ default_settings :: proc() -> Settings {
 
 		active_slot  = -1,
 		boss_list    = "standard",
-		show_deaths  = false,
+		show_deaths   = false,
+		show_attempts = true,
+		show_session  = false,
 		poll_seconds = POLL_SECONDS_DEFAULT,
 
 		server_enabled = true,
@@ -220,7 +266,7 @@ default_settings :: proc() -> Settings {
 		browser_region   = {mode = "first"},
 		text_region      = {mode = "first"},
 		ws_region        = {mode = "first"},
-		browser_look     = default_appearance(),
+		browser_look     = default_browser_appearance(),
 		ws_look          = default_appearance(),
 		last_kill_region = "",
 
@@ -237,7 +283,13 @@ default_settings :: proc() -> Settings {
 		obsws_send_region        = true,
 		obsws_send_region_bosses = true,
 		obsws_send_overlay       = false,
+		obsws_send_attempts      = true,
+		obsws_send_session       = false,
 		obsws_source_style       = "text",
+
+		attempts_slot       = -1,
+		kill_banner_enabled = true,
+		kill_banner_seconds = KILL_BANNER_SECONDS_DEFAULT,
 
 		text_roomy_lines = true,
 		ws_roomy_lines   = true,
@@ -399,6 +451,7 @@ settings_own_strings :: proc(s: ^Settings, allocator := context.allocator) {
 		&s.obs_text_dir,
 		&s.obsws_host,
 		&s.obsws_password,
+		&s.obsws_scene,
 		&s.theme,
 		&s.browser_region.mode,
 		&s.browser_region.name,
@@ -453,6 +506,24 @@ migrate_settings :: proc(s: ^Settings) {
 	// v5 → v6 is handled separately in migrate_v5, which needs the raw
 	// JSON: the keys it reads no longer exist on this struct, so by the
 	// time the decoder is done they're already gone.
+	// v7 adds the attempts bookmark and the kill banner. A decoded v6 file
+	// leaves them zeroed, and zero is a real slot index — so these have to
+	// be written rather than left to the decoder's defaults.
+	if s.version < 7 {
+		s.attempts_slot       = -1
+		s.attempts_base       = 0
+		s.kill_banner_enabled = true
+		s.kill_banner_seconds = KILL_BANNER_SECONDS_DEFAULT
+		s.show_attempts       = true
+
+		// Until v7 this number only ever styled the widget sources, which
+		// the overlay page hasn't got — so whatever is in the file was
+		// chosen for something else and has never been seen on the card.
+		// Start everyone at the card's natural size rather than suddenly
+		// honouring it and blowing the overlay up on first launch.
+		s.browser_look.font_size = OVERLAY_BASE_FONT_PX
+	}
+
 	s.version = SETTINGS_VERSION
 }
 
@@ -553,6 +624,18 @@ settings_apply_bounds :: proc(s: ^Settings) {
 	case "text", "web": // fine
 	case:               s.obsws_source_style = "text"
 	}
+
+	if s.kill_banner_seconds < KILL_BANNER_SECONDS_MIN ||
+	   s.kill_banner_seconds > KILL_BANNER_SECONDS_MAX {
+		s.kill_banner_seconds = KILL_BANNER_SECONDS_DEFAULT
+	}
+	// A bookmark against a slot that isn't there any more is worse than
+	// none: it would silently measure against another character.
+	if s.attempts_slot < 0 || s.attempts_slot >= SLOT_COUNT {
+		s.attempts_slot = -1
+		s.attempts_base = 0
+	}
+	if s.attempts_base < 0 do s.attempts_base = 0
 
 	region_choice_apply_bounds(&s.browser_region)
 	region_choice_apply_bounds(&s.text_region)

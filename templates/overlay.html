@@ -19,7 +19,15 @@
                 {{#if show_deaths}}
                 <span class="deaths">{{death_count}} deaths</span>
                 {{/if}}
+                {{#if show_attempts}}
+                <span class="attempts">Attempt {{attempts}}</span>
+                {{/if}}
             </div>
+            {{#if show_session}}
+            <div class="header-row">
+                <span class="session">Session: {{session_text}}</span>
+            </div>
+            {{/if}}
             <div class="header-row">
                 <span class="remaining-label">{{remaining}} REMAINING ({{killed_count}}/{{total_bosses}})</span>
             </div>

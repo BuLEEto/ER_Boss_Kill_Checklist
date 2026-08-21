@@ -83,6 +83,18 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 				"Properties → Custom CSS. The page's colours are CSS variables, so one rule repaints the lot:\n\n:root { --gold: #ff4444; --text: #ffffff; }\n\nVariables are --gold, --gold-dim, --text, --text-dim, --red and --green. The app never writes to that box, so whatever you put there survives.",
 			},
 			Help_Step{
+				"Attempt counter",
+				"\"Attempt 12\" is the deaths you've taken since the last boss you killed, and it resets itself the moment the next one falls. Elden Ring doesn't record deaths per boss, so that's what it is — deaths since your last kill. Die exploring and it still counts. There's a Reset on the Checklist tab for when it's measuring the wrong thing.",
+			},
+			Help_Step{
+				"Boss defeated banner",
+				"When a boss dies the overlay announces it by name for a few seconds, then goes back to the numbers. It sits at the bottom of the browser source, so give the source some height below the card — with the source cropped tight to the card there's nowhere for it to go and it will overlap.\n\nIt uses this panel's accent and text colours. Turn it off with \"Announce kills on the overlay\".",
+			},
+			Help_Step{
+				"How quickly it reacts",
+				"Everything here comes from the save file, and Elden Ring only writes that every so often. Expect a kill to show up within about ten seconds of the fight ending, not the instant the boss falls — soon enough for the replay, not for the exact moment.",
+			},
+			Help_Step{
 				"Why this and not a text source",
 				"OBS text sources have no alignment and no line height, so a multi-line list is stuck left-aligned with whatever spacing the font gives. This is a web page, so Align actually aligns every line, and the styling is yours to change.",
 			},
@@ -134,12 +146,20 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 				"Host stays 127.0.0.1 if OBS is on this machine. Tick Remember the password to skip re-typing it next time — it's encrypted before it's written to disk.",
 			},
 			Help_Step{
-				"Six sources appear in your current scene",
-				"ER Progress, ER Next Boss, ER Deaths, ER Character, ER Region and ER Region Bosses. They're created with a bold white font and a dark outline, stacked down the left, so they're readable and not piled on top of each other.",
+				"Choose the scene first",
+				"Add to scene decides where the sources are created. Leave it on the default and they land in whichever scene is live when the app connects — fine if that's your gameplay scene, less fine if it's Starting Soon. Your scenes are listed once you've connected once; change it later and the app reconnects and adds them to the scene you picked.",
+			},
+			Help_Step{
+				"The sources appear in that scene",
+				"ER Progress, ER Next Boss, ER Deaths, ER Attempts, ER Session, ER Character, ER Region and ER Region Bosses. They're created with a bold white font and a dark outline, stacked down the left, so they're readable and not piled on top of each other.",
 			},
 			Help_Step{
 				"Choose which ones you want",
 				"The Send to OBS list decides what gets created. Unticked sources are never added to your scene. ER Region shows an area and its count (\"Caelid (12/15)\"); ER Region Bosses lists what's left in it, one per line.",
+			},
+			Help_Step{
+				"Attempts and Session",
+				"ER Attempts is the deaths since your last boss kill — Elden Ring doesn't record deaths per boss, so that's what it counts, and dying to anything else counts too. ER Session is bosses and deaths for this sitting, and starts again each time you open the app. Both have a Reset on the Checklist tab.",
 			},
 			Help_Step{
 				"Text or Web?",

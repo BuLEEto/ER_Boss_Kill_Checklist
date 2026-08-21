@@ -190,6 +190,12 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 	mode := len(mode_param) > 0 ? mode_param : app.settings.overlay_mode
 	show_deaths := app.settings.show_deaths || deaths_param == "true"
 
+	attempts_param, _ := http.request_query(req, "attempts")
+	session_param, _ := http.request_query(req, "session")
+	attempts, has_attempts := app_attempts()
+	show_attempts := (app.settings.show_attempts || attempts_param == "true") && has_attempts
+	show_session := app.settings.show_session || session_param == "true"
+
 	// Rendered into <body class="...">, rather than left to the page's JS
 	// to add on load. The overlay reloads itself on every kill, so a
 	// class applied after paint means a visible flash of the unaligned
@@ -267,6 +273,10 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 		remaining:         int,
 		death_count:       u32,
 		show_deaths:       bool,
+		attempts:          int,
+		show_attempts:     bool,
+		session_text:      string,
+		show_session:      bool,
 		is_summary:        bool,
 		is_region:         bool,
 		is_next:           bool,
@@ -284,6 +294,10 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 		remaining         = total - killed,
 		death_count       = app.death_count,
 		show_deaths       = show_deaths,
+		attempts          = attempts,
+		show_attempts     = show_attempts,
+		session_text      = session_summary(),
+		show_session      = show_session,
 		is_summary        = mode == "summary",
 		is_region         = mode == "region",
 		is_next           = mode == "next",
@@ -453,6 +467,37 @@ sse_broadcast_update :: proc(killed, total: int, deaths: u32) {
 	}
 }
 
+// Tell the overlay a boss just fell, so it can play a banner before it
+// reloads for the new numbers.
+//
+// A separate event rather than a flag on boss_update, because the overlay
+// reloads on an update and a reload would cut the animation off partway.
+// Hearing about the kill first lets the page hold the reload back until
+// the banner has finished.
+sse_broadcast_kill :: proc(names: []string) {
+	if len(names) == 0 do return
+
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, `{{"seconds":%d,"names":[`, app.settings.kill_banner_seconds)
+	for n, i in names {
+		if i > 0 do strings.write_string(&b, ",")
+		strings.write_string(&b, `"`)
+		json_escape_string(&b, n)
+		strings.write_string(&b, `"`)
+	}
+	strings.write_string(&b, `]}`)
+	payload := strings.to_string(b)
+
+	sync.mutex_lock(&app.sse_mutex)
+	defer sync.mutex_unlock(&app.sse_mutex)
+
+	for i := len(app.sse_clients) - 1; i >= 0; i -= 1 {
+		if !http.sse_event(app.sse_clients[i], payload, event = "boss_killed") {
+			ordered_remove(&app.sse_clients, i)
+		}
+	}
+}
+
 // ----------------------------------------------------------------------------
 
 parse_int_default :: proc(s: string, fallback: int) -> int {
@@ -472,6 +517,17 @@ parse_int_default :: proc(s: string, fallback: int) -> int {
 // The value shown mirrors what the obs-websocket text sources send, so
 // the two integrations never disagree about what "progress" means.
 // ----------------------------------------------------------------------------
+
+// "2 bosses · 31 deaths". One definition, so the overlay, the widget, the
+// text file and the obs-websocket source can't disagree — including about
+// whether it's one boss or one bosses.
+session_summary :: proc() -> string {
+	return fmt.tprintf(
+		"%d %s · %d %s",
+		app.session_bosses, app.session_bosses == 1 ? "boss" : "bosses",
+		app.session_deaths, app.session_deaths == 1 ? "death" : "deaths",
+	)
+}
 
 Widget_Line :: struct {
 	text: string,
@@ -544,6 +600,12 @@ widget_content :: proc(kind: string) -> (label: string, value: string, lines: []
 		return "Complete", fmt.tprintf("%d%%", pct), nil
 	case "deaths":
 		return "Deaths", fmt.tprintf("%d", app.death_count), nil
+	case "attempts":
+		n, ok := app_attempts()
+		if !ok do return "Attempts", "—", nil
+		return "Attempts", fmt.tprintf("%d", n), nil
+	case "session":
+		return "This session", session_summary(), nil
 	case "character":
 		if len(name) == 0 do return "Character", "No character", nil
 		return "Character", fmt.tprintf("%s — RL %d", name, level), nil
@@ -605,10 +667,18 @@ overlay_theme_css :: proc(look: Appearance, allocator := context.temp_allocator)
 		look.text_color,
 	)
 
+	// Two size origins, one setting. A widget page has .widget-value and no
+	// .overlay; the overlay page is the other way round — so both rules go
+	// out and each page uses the one it has. Everything inside either is
+	// sized in em, so this scales the whole thing rather than leaving big
+	// text in a small box.
+	//
+	// The kill banner is deliberately left out: it keeps its own size, so
+	// scaling the card up doesn't produce a banner the size of the canvas.
 	fmt.sbprintf(
 		&b,
-		".widget-value,.widget-line{{font-size:%dpx;}}",
-		look.font_size,
+		".widget-value,.widget-line{{font-size:%dpx;}}.overlay{{font-size:%dpx;}}",
+		look.font_size, look.font_size,
 	)
 
 	if len(look.font_family) > 0 {
@@ -618,7 +688,15 @@ overlay_theme_css :: proc(look: Appearance, allocator := context.temp_allocator)
 	}
 
 	if !look.outline {
-		strings.write_string(&b, ".widget-value,.widget-line{text-shadow:none;}")
+		// The chroma-key variants have to be named explicitly: they set the
+		// outline on a more specific selector, so a bare .overlay rule
+		// would lose to them however late it is injected.
+		strings.write_string(
+			&b,
+			".widget-value,.widget-line{text-shadow:none;}" +
+			".overlay,body.bg-green .overlay,body.bg-magenta .overlay" +
+			",.kill-banner-name,.kill-banner-title{text-shadow:none;}",
+		)
 	}
 
 	if len(look.custom_css) > 0 {

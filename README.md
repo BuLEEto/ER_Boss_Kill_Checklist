@@ -15,6 +15,11 @@ beaten — safe to use with EAC.
 - Multiple boss lists: all bosses, main story, remembrances, great runes, DLC,
   hardlock
 - Reads your death count and character level
+- **Attempt counter** — deaths since your last boss kill, reset automatically
+  when the next one falls
+- **Session totals** — bosses and deaths for this sitting
+- **Boss defeated banner** — the overlay names the boss for a few seconds when
+  it dies
 - Remembers your setup — save file, character, boss list, window size, theme —
   between restarts
 - Elden Ring colour theme by default (Dark, Light and follow-the-OS also
@@ -24,7 +29,7 @@ beaten — safe to use with EAC.
   - **Text files** — plain text files for OBS "Text (GDI+/FreeType)" sources
     set to *Read from file*. Works on any OBS version, no browser source
   - **obs-websocket** — connects to OBS directly and keeps text sources
-    updated, the way most OBS tools work
+    updated, the way most OBS tools work. Pick which scene they go in
 - Mobile companion page for single-monitor players
 
 ## Building
@@ -156,6 +161,31 @@ width or height after creating it, so your styling and sizing survive. The green
 options exist for people capturing the page as a window instead, where a
 transparent background isn't possible and you need a chroma key.
 
+### Attempts, sessions and the kill banner
+
+**Attempts** is the number of deaths since the last boss you killed, and it
+resets itself the moment the next one falls. Elden Ring doesn't record deaths
+per boss anywhere in the save, so that is exactly what it counts — a death
+exploring, to a fall, or to an invader lands in it too. It's the number souls
+streamers usually mean by "attempt 38", but it's an inference, not a per-boss
+stat. There's a **Reset attempts** button on the Checklist tab.
+
+**Session** is bosses and deaths for this sitting. It starts again each time you
+open the app, and has its own reset.
+
+Both are bookmarked per character, so switching character doesn't subtract one
+Tarnished's deaths from another's.
+
+**Boss defeated banner** announces the boss by name on the overlay browser
+source for a few seconds, then goes back to the numbers. It sits at the bottom
+of the source, so leave that source some height below the card or the two will
+overlap. It uses the Browser source panel's accent and text colours, and can be
+turned off.
+
+Everything here comes from the save file, and the game only writes that every so
+often — so expect a kill to show up within about ten seconds of the fight
+ending, not the instant the boss falls.
+
 ### Text files
 
 Turn on *Write text files* and point OBS **Text (GDI+)** / **Text (FreeType 2)**
@@ -168,6 +198,8 @@ works on every OBS version:
 | `killed.txt` / `total.txt` / `remaining.txt` | just the number |
 | `percent.txt` | `54%` |
 | `deaths.txt` | death count |
+| `attempts.txt` | deaths since your last boss kill |
+| `session.txt` | `2 bosses · 31 deaths` for this sitting |
 | `character.txt` | `Moo Moo Ruka — RL 113` |
 | `next_boss.txt` | the next boss still standing |
 | `next_bosses.txt` | the next few, one per line |
@@ -178,12 +210,20 @@ works on every OBS version:
 ### obs-websocket
 
 Enable OBS's own WebSocket server (**Tools → WebSocket Server Settings**), then
-enter the host, port and password on the OBS tab and hit **Connect**. The app
-creates six text sources in your current scene — `ER Progress`, `ER Next Boss`,
-`ER Deaths`, `ER Character`, `ER Region` and `ER Region Bosses` — with a bold
-white font and a dark outline, stacked down the left so they don't land on top
-of each other. `ER Region` and `ER Region Bosses` give you the same per-area
-breakdown as the overlay's Region mode.
+enter the host, port and password on the OBS tab and hit **Connect**.
+
+**Add to scene** decides where the sources are created. Leave it on the default
+and they land in whichever scene happens to be live when the app connects —
+which is fine until that's your *Starting Soon* scene. Your scenes are listed
+once you've connected once. Changing it reconnects and adds the sources to the
+scene you picked; the copies in the old scene are left alone, so delete those in
+OBS if you don't want them.
+
+The app creates a text source per ticked entry — `ER Progress`, `ER Next Boss`,
+`ER Deaths`, `ER Attempts`, `ER Session`, `ER Character`, `ER Region` and
+`ER Region Bosses` — with a bold white font and a dark outline, stacked down the
+left so they don't land on top of each other. `ER Region` and `ER Region Bosses`
+give you the same per-area breakdown as the overlay's Region mode.
 
 Restyle and position them in OBS however you like: the app only ever changes
 their text, and a source that already exists is never created, moved or

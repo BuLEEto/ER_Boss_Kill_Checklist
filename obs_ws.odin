@@ -50,6 +50,8 @@ Obs_Source :: enum {
 	Character,     // name and level
 	Region,        // the focused area and its count
 	Region_Bosses, // what's left in that area, one per line
+	Attempts,      // "Attempt 12" — deaths since the last kill
+	Session,       // "2 bosses · 31 deaths" this sitting
 
 	// Not a text source: a browser source pointed at the overlay page
 	// this app already serves. It's the only way to get real typography
@@ -67,6 +69,8 @@ obs_source_name :: proc(k: Obs_Source) -> string {
 	case .Character:     return "ER Character"
 	case .Region:        return "ER Region"
 	case .Region_Bosses: return "ER Region Bosses"
+	case .Attempts:      return "ER Attempts"
+	case .Session:       return "ER Session"
 	case .Overlay:       return "ER Overlay"
 	}
 	return ""
@@ -80,6 +84,8 @@ obs_source_label :: proc(k: Obs_Source) -> string {
 	case .Character:     return "Character — name and level"
 	case .Region:        return "Region — the area and its count"
 	case .Region_Bosses: return "Region bosses — what's left there"
+	case .Attempts:      return "Attempts — deaths since your last kill"
+	case .Session:       return "Session — bosses and deaths this sitting"
 	case .Overlay:       return "Overlay page — the styled browser source"
 	}
 	return ""
@@ -95,6 +101,8 @@ obs_source_widget :: proc(k: Obs_Source) -> string {
 	case .Character:     return "character"
 	case .Region:        return "region"
 	case .Region_Bosses: return "region_bosses"
+	case .Attempts:      return "attempts"
+	case .Session:       return "session"
 	case .Overlay:       return ""
 	}
 	return ""
@@ -108,10 +116,17 @@ obs_source_enabled :: proc(k: Obs_Source) -> bool {
 	case .Character:     return app.settings.obsws_send_character
 	case .Region:        return app.settings.obsws_send_region
 	case .Region_Bosses: return app.settings.obsws_send_region_bosses
+	case .Attempts:      return app.settings.obsws_send_attempts
+	case .Session:       return app.settings.obsws_send_session
 	case .Overlay:       return app.settings.obsws_send_overlay
 	}
 	return false
 }
+
+// Shown in the scene picker for "don't pin it, use whatever is on air".
+// Stored as an empty string, so a scene the user later renames — or
+// actually names this — can't be confused for the setting.
+OBSWS_SCENE_CURRENT_LABEL :: "Current scene (whatever's live)"
 
 Obsws_State :: enum {
 	Disconnected,
@@ -132,8 +147,9 @@ Obsws :: struct {
 	conn:      ^ws.Conn,
 	state:     Obsws_State,
 	status:    string, // owned
-	scene:     string, // owned; scene new sources get added to
-	text_kind: string, // owned; platform's text input kind
+	scene:     string,   // owned; scene new sources get added to
+	scenes:    []string, // owned; every scene OBS reported, for the picker
+	text_kind: string,   // owned; platform's text input kind
 	reader:    ^thread.Thread,
 	next_id:   int,
 }
@@ -177,6 +193,13 @@ Obsws_Connect_Params :: struct {
 	host:     string, // heap; the worker frees them
 	port:     int,
 	password: string,
+
+	// Captured here rather than read from app.settings on the worker,
+	// because the GUI thread owns that string and is free to delete it the
+	// moment the user edits a setting. Same reason host and password are
+	// cloned — a worker reading live settings is reading memory it doesn't
+	// own. Empty means "whatever scene is live when we get there".
+	scene: string,
 }
 
 // Kick off a connection on a worker thread. Called from `update`, which
@@ -186,12 +209,14 @@ obsws_connect_command :: proc() -> Obsws_Connect_Params {
 		host     = strings.clone(app.settings.obsws_host),
 		port     = app.settings.obsws_port,
 		password = strings.clone(app.settings.obsws_password),
+		scene    = strings.clone(app.settings.obsws_scene),
 	}
 }
 
 obsws_connect_worker :: proc(p: Obsws_Connect_Params) -> Msg {
 	defer delete(p.host)
 	defer delete(p.password)
+	defer delete(p.scene)
 
 	obsws_teardown()
 	set_status(.Connecting, "Connecting…")
@@ -220,7 +245,7 @@ obsws_connect_worker :: proc(p: Obsws_Connect_Params) -> Msg {
 	// Discover the scene and text-source kind, then make sure our four
 	// sources exist. Failure here is not fatal — the connection is still
 	// usable, the user just has to create sources by hand.
-	obsws_prepare_sources(conn)
+	obsws_prepare_sources(conn, p.scene)
 
 	// From here the reader parks on a socket that will be silent for
 	// minutes at a time, so socket timeouts stop meaning "disconnected".
@@ -411,11 +436,17 @@ obsws_request :: proc(conn: ^ws.Conn, request_type: string, request_data: string
 	return id, ws.send_text(conn, strings.to_string(b)) == .None
 }
 
-// Ask OBS what scene we're on and which text plugin this platform has,
-// then create any of our sources that don't exist yet.
+// Work out which scene to build in, learn which text plugin this platform
+// has, and make sure every ticked source exists there.
+//
+// Safe to run more than once: it is what a fresh connection calls, and
+// also what a change of target scene calls. Everything it does is
+// conditional on what OBS already has.
 @(private = "file")
-obsws_prepare_sources :: proc(conn: ^ws.Conn) {
-	scene := obsws_current_scene(conn)
+obsws_prepare_sources :: proc(conn: ^ws.Conn, want_scene: string) {
+	scenes := obsws_scene_list(conn, context.temp_allocator)
+	scene := obsws_target_scene(conn, want_scene, scenes)
+
 	// The OBS plugin id for a text source, e.g. text_ft2_source_v2 — not
 	// to be confused with the Obs_Source kinds looped over below.
 	input_kind := obsws_text_kind(conn)
@@ -423,8 +454,11 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn) {
 	sync.mutex_lock(&g_obs.mu)
 	if len(g_obs.scene) > 0 do delete(g_obs.scene)
 	if len(g_obs.text_kind) > 0 do delete(g_obs.text_kind)
+	obsws_free_scenes()
 	g_obs.scene = strings.clone(scene)
 	g_obs.text_kind = strings.clone(input_kind)
+	g_obs.scenes = make([]string, len(scenes))
+	for n, i in scenes do g_obs.scenes[i] = strings.clone(n)
 	sync.mutex_unlock(&g_obs.mu)
 
 	if len(scene) == 0 || len(input_kind) == 0 do return
@@ -455,9 +489,20 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn) {
 		}
 
 		if name in existing {
-			// Re-ticked, or just already there. Make sure it's visible
-			// again, but don't touch its position or styling.
-			obsws_show_source(conn, scene, name, true)
+			// The input exists somewhere in OBS, which is not the same as
+			// it being in *this* scene — inputs are global and a scene
+			// item is only a reference to one. After a change of target
+			// scene the input is there and the reference isn't, so add
+			// one rather than leaving the user with a source they can't
+			// see and no clue why.
+			if _, in_scene := obsws_scene_item_id(conn, scene, name); in_scene {
+				obsws_show_source(conn, scene, name, true)
+				continue
+			}
+			if obsws_create_scene_item(conn, scene, name) {
+				obsws_place_source(conn, scene, name, 48, y)
+				y += LINE_HEIGHT
+			}
 			continue
 		}
 
@@ -485,6 +530,90 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn) {
 		obsws_place_source(conn, scene, name, 48, y)
 		y += LINE_HEIGHT
 	}
+}
+
+// The scene to build in: the configured one when OBS still has a scene by
+// that name, otherwise whatever is on air.
+//
+// Falling back matters — a scene the user has since renamed or deleted
+// would otherwise send every request to a name OBS doesn't know, and OBS
+// answers that with an error per request rather than anything the user
+// would see. Better to land somewhere visible than nowhere at all.
+@(private = "file")
+obsws_target_scene :: proc(conn: ^ws.Conn, want: string, scenes: []string) -> string {
+	if len(want) > 0 {
+		for sc in scenes {
+			if sc == want do return want
+		}
+	}
+	return obsws_current_scene(conn)
+}
+
+// Add an existing input to a scene as a new scene item. Used when the
+// target scene changes: the input is already there, it just isn't
+// referenced from the scene the user has now picked.
+@(private = "file")
+obsws_create_scene_item :: proc(conn: ^ws.Conn, scene, name: string) -> bool {
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, `{"sceneName":"`)
+	json_escape_string(&b, scene)
+	strings.write_string(&b, `","sourceName":"`)
+	json_escape_string(&b, name)
+	strings.write_string(&b, `","sceneItemEnabled":true}`)
+	_, ok := obsws_request_sync(conn, "CreateSceneItem", strings.to_string(b))
+	return ok
+}
+
+// Every scene OBS knows about, in the order it reports them.
+@(private = "file")
+obsws_scene_list :: proc(conn: ^ws.Conn, allocator := context.allocator) -> []string {
+	d, ok := obsws_request_sync(conn, "GetSceneList")
+	if !ok do return nil
+
+	data := json_object(d, "responseData")
+	obj, is_obj := data.(json.Object)
+	if !is_obj do return nil
+
+	raw, has := obj["scenes"]
+	if !has do return nil
+	arr, is_arr := raw.(json.Array)
+	if !is_arr do return nil
+
+	out := make([dynamic]string, 0, len(arr), allocator)
+	for v in arr {
+		if name := json_string(v, "sceneName"); len(name) > 0 {
+			append(&out, name)
+		}
+	}
+	return out[:]
+}
+
+// Caller must hold g_obs.mu.
+@(private = "file")
+obsws_free_scenes :: proc() {
+	for sc in g_obs.scenes do delete(sc)
+	if g_obs.scenes != nil do delete(g_obs.scenes)
+	g_obs.scenes = nil
+}
+
+// The scene list, cloned for the caller. The GUI calls this every frame
+// while the OBS tab is open, so it clones into the frame arena rather
+// than handing out pointers into state a reconnect is free to free.
+obsws_scene_names :: proc(allocator := context.temp_allocator) -> []string {
+	sync.mutex_lock(&g_obs.mu)
+	defer sync.mutex_unlock(&g_obs.mu)
+
+	if len(g_obs.scenes) == 0 do return nil
+	out := make([]string, len(g_obs.scenes), allocator)
+	for sc, i in g_obs.scenes do out[i] = strings.clone(sc, allocator)
+	return out
+}
+
+// The scene sources are actually being built in, for the OBS tab to show.
+obsws_active_scene :: proc(allocator := context.temp_allocator) -> string {
+	sync.mutex_lock(&g_obs.mu)
+	defer sync.mutex_unlock(&g_obs.mu)
+	return strings.clone(g_obs.scene, allocator)
 }
 
 // A browser source pointed at our own overlay page.
@@ -750,6 +879,12 @@ obsws_push_update :: proc() {
 
 	character := len(name) > 0 ? fmt.tprintf("%s — RL %d", name, level) : "No character"
 
+	attempts_text := "Attempt —"
+	if n, ok := app_attempts(); ok {
+		attempts_text = fmt.tprintf("Attempt %d", n)
+	}
+	session_text := session_summary()
+
 	region_text := "All regions cleared"
 	region_bosses := "All regions cleared"
 	if idx := app_focus_region(app.settings.ws_region); idx >= 0 {
@@ -796,6 +931,8 @@ obsws_push_update :: proc() {
 		case .Character:     value = character
 		case .Region:        value = region_text
 		case .Region_Bosses: value = region_bosses
+		case .Attempts:      value = attempts_text
+		case .Session:       value = session_text
 		case .Overlay:       // handled above
 		}
 

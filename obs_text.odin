@@ -28,6 +28,8 @@ OBS_TEXT_FILES :: [?]Obs_Text_File {
 	{"remaining.txt",    "bosses left, number only"},
 	{"percent.txt",      "\"25%\""},
 	{"deaths.txt",       "death count, number only"},
+	{"attempts.txt",     "deaths since your last boss kill, number only"},
+	{"session.txt",      "\"2 bosses · 31 deaths\" for this sitting"},
 	{"character.txt",    "\"Tarnished — RL 150\""},
 	{"next_boss.txt",    "the next boss still standing"},
 	{"next_bosses.txt",  "the next few bosses, one per line"},
@@ -70,6 +72,12 @@ obs_text_write_all :: proc() -> os.Error {
 	if len(name) > 0 {
 		character = fmt.tprintf("%s — RL %d", name, level)
 	}
+
+	attempts_text := "—"
+	if n, ok := app_attempts(); ok {
+		attempts_text = fmt.tprintf("%d", n)
+	}
+	session_text := session_summary()
 
 	next := app_next_bosses(app.settings.overlay_next_count, context.temp_allocator)
 
@@ -115,6 +123,8 @@ obs_text_write_all :: proc() -> os.Error {
 		fmt.tprintf("%d", remaining),
 		fmt.tprintf("%d%%", percent),
 		fmt.tprintf("%d", app.death_count),
+		attempts_text,
+		session_text,
 		character,
 		next_one,
 		next_many,
