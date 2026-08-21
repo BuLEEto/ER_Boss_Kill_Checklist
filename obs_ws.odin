@@ -113,8 +113,17 @@ Obsws_Connect_Params :: struct {
 	// because the GUI thread owns that string and is free to delete it the
 	// moment the user edits a setting. Same reason host and password are
 	// cloned — a worker reading live settings is reading memory it doesn't
-	// own. Empty means "whatever scene is live when we get there".
+	// own. Empty means "not chosen", in which case nothing is created.
 	scene: string,
+
+	// Same reasoning: font_family and color are heap strings the GUI
+	// thread is free to delete the moment the user moves a control, and
+	// the worker reads them while building each source's settings. Copied
+	// so a font change mid-connect can't pull one out from under it.
+	look: Obs_Text_Look,
+
+	// Read on the worker too, and cheap to carry.
+	send: [len(Widget_Kind)]bool,
 }
 
 // Kick off a connection on a worker thread. Called from `update`, which
@@ -125,6 +134,14 @@ obsws_connect_command :: proc() -> Obsws_Connect_Params {
 		port     = app.settings.obsws_port,
 		password = strings.clone(app.settings.obsws_password),
 		scene    = strings.clone(app.settings.obsws_scene),
+		look     = Obs_Text_Look {
+			font_family = strings.clone(app.settings.obsws_look.font_family),
+			color       = strings.clone(app.settings.obsws_look.color),
+			font_size   = app.settings.obsws_look.font_size,
+			bold        = app.settings.obsws_look.bold,
+			outline     = app.settings.obsws_look.outline,
+		},
+		send     = app.settings.obsws_send,
 	}
 }
 
@@ -132,6 +149,8 @@ obsws_connect_worker :: proc(p: Obsws_Connect_Params) -> Msg {
 	defer delete(p.host)
 	defer delete(p.password)
 	defer delete(p.scene)
+	defer delete(p.look.font_family)
+	defer delete(p.look.color)
 
 	obsws_teardown()
 	set_status(.Connecting, "Connecting…")
@@ -160,7 +179,7 @@ obsws_connect_worker :: proc(p: Obsws_Connect_Params) -> Msg {
 	// Discover the scene and text-source kind, then make sure our four
 	// sources exist. Failure here is not fatal — the connection is still
 	// usable, the user just has to create sources by hand.
-	obsws_prepare_sources(conn, p.scene)
+	obsws_prepare_sources(conn, p)
 
 	// From here the reader parks on a socket that will be silent for
 	// minutes at a time, so socket timeouts stop meaning "disconnected".
@@ -358,7 +377,7 @@ obsws_request :: proc(conn: ^ws.Conn, request_type: string, request_data: string
 // also what a change of target scene calls. Everything it does is
 // conditional on what OBS already has.
 @(private = "file")
-obsws_prepare_sources :: proc(conn: ^ws.Conn, want_scene: string) {
+obsws_prepare_sources :: proc(conn: ^ws.Conn, p: Obsws_Connect_Params) {
 	scenes := obsws_scene_list(conn, context.temp_allocator)
 
 	// Only ever the scene the user picked. No fallback to whatever is on
@@ -367,7 +386,7 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn, want_scene: string) {
 	// it's the kind of mess you discover mid-stream.
 	scene := ""
 	for sc in scenes {
-		if sc == want_scene { scene = want_scene; break }
+		if sc == p.scene { scene = p.scene; break }
 	}
 
 	// The OBS plugin id for a text source, e.g. text_ft2_source_v2 — not
@@ -410,7 +429,7 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn, want_scene: string) {
 		// styled and positioned it, and OBS has no undo for a deleted
 		// source — hiding takes it off the canvas, is one click to
 		// reverse, and re-ticking here brings it straight back.
-		if !obsws_sends(kind) {
+		if !p.send[int(kind)] {
 			if name in existing do obsws_show_source(conn, scene, name, false)
 			continue
 		}
@@ -440,7 +459,7 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn, want_scene: string) {
 		// have browser sources is better served by copying a URL from the
 		// Overlay card or Single values panel.
 		kind_id := input_kind
-		settings := obsws_style_settings(input_kind, with_text = true)
+		settings := obsws_style_settings(input_kind, p.look, with_text = true)
 
 		b := strings.builder_make(context.temp_allocator)
 		strings.write_string(&b, `{"sceneName":"`)
@@ -538,9 +557,7 @@ obsws_active_scene :: proc(allocator := context.temp_allocator) -> string {
 // "overlay":true, which merges, so pushing style alone leaves the current
 // value on screen untouched.
 @(private = "file")
-obsws_style_settings :: proc(kind: string, with_text: bool) -> string {
-	look := app.settings.obsws_look
-
+obsws_style_settings :: proc(kind: string, look: Obs_Text_Look, with_text: bool) -> string {
 	face := look.font_family
 	if len(face) == 0 {
 		// Each plugin's own sensible default rather than one shared name
@@ -614,7 +631,7 @@ obsws_push_style :: proc() {
 		strings.write_string(&b, `{"inputName":"`)
 		json_escape_string(&b, obs_source_name(k))
 		strings.write_string(&b, `","inputSettings":`)
-		strings.write_string(&b, obsws_style_settings(kind, with_text = false))
+		strings.write_string(&b, obsws_style_settings(kind, app.settings.obsws_look, with_text = false))
 		strings.write_string(&b, `,"overlay":true}`)
 		obsws_request(conn, "SetInputSettings", strings.to_string(b))
 	}
