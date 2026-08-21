@@ -100,6 +100,38 @@ widget_preview :: proc(k: Widget_Kind) -> string {
 	return value
 }
 
+// ----------------------------------------------------------------------------
+// As OBS text sources
+//
+// The same eight values, pushed into OBS text sources over obs-websocket
+// instead of being served as pages. That exists because a good many Linux
+// OBS builds — Debian's and Ubuntu's among them — are packaged without
+// CEF and so have no Browser source at all. On those, a page is not an
+// option: window-capturing one browser is awkward and eight is absurd, so
+// text sources driven directly are the only workable route.
+// ----------------------------------------------------------------------------
+
+// The name the source gets in OBS. The "ER " prefix keeps them together in
+// the source list and out of the way of the user's own names.
+obs_source_name :: proc(k: Widget_Kind) -> string {
+	switch k {
+	case .Progress:      return "ER Progress"
+	case .Next_Boss:     return "ER Next Boss"
+	case .Deaths:        return "ER Deaths"
+	case .Attempts:      return "ER Attempts"
+	case .Session:       return "ER Session"
+	case .Character:     return "ER Character"
+	case .Region:        return "ER Region"
+	case .Region_Bosses: return "ER Region Bosses"
+	}
+	return ""
+}
+
+// Whether this value is one of the sources to create and keep updated.
+obsws_sends :: proc(k: Widget_Kind) -> bool {
+	return app.settings.obsws_send[int(k)]
+}
+
 widget_kind_from_slug :: proc(slug: string) -> (Widget_Kind, bool) {
 	for k in Widget_Kind {
 		if widget_slug(k) == slug do return k, true

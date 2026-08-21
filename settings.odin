@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import sb "src/libs/sbcrypto"
 
 // ============================================================================
 // Settings
@@ -56,7 +57,8 @@ POLL_SECONDS_DEFAULT :: 5
 //   7  attempts bookmark, kill banner, and the overlay card's own text size
 //   8  obs-websocket removed; the single-value pages get per-page looks
 //   9  overlay card panel, hide-cleared, and labels on the value pages
-SETTINGS_VERSION :: 9
+//  10  obs-websocket back, text sources only, for OBS builds without CEF
+SETTINGS_VERSION :: 10
 
 // Which region an integration follows. One of these per integration
 // rather than one shared between them: the OBS tab has a panel per
@@ -207,6 +209,46 @@ Settings :: struct {
 	// line ourselves. The served pages don't need this; they have CSS.
 	text_roomy_lines: bool `json:"text_roomy_lines"`,
 
+	// ---- OBS text sources over obs-websocket ---------------------------
+	//
+	// Back after a spell removed. It went on the grounds that a Browser
+	// source is the thing every OBS user can reach for, and that turned
+	// out to be false on Linux: Debian and Ubuntu package OBS without CEF,
+	// so those builds have no Browser source at all. Window-capturing a
+	// browser covers one value awkwardly and eight not at all, which
+	// leaves driving OBS text sources directly as the only route.
+	//
+	// Text sources only now. Creating browser sources here — which it used
+	// to offer — would be handing those users the one thing they can't
+	// use, and anyone who does have Browser sources is better served by
+	// copying a URL from the Overlay card or Single values panel. That
+	// also stops this being a second way to do the browser thing, which is
+	// what made the OBS tab confusing the first time round.
+	obsws_enabled:           bool   `json:"obsws_enabled"`,
+	obsws_host:              string `json:"obsws_host"`,
+	obsws_port:              int    `json:"obsws_port"`,
+	obsws_remember_password: bool   `json:"obsws_remember_password"`,
+
+	// Encrypted at rest — see src/libs/sbcrypto. Held in memory decrypted.
+	obsws_password: string `json:"obsws_password_enc"`,
+
+	// Which scene new sources are created in. Empty means "not chosen",
+	// and in that state nothing is created at all: dropping eight sources
+	// into whichever scene happened to be live is the sort of thing you
+	// discover mid-stream.
+	obsws_scene: string `json:"obsws_scene"`,
+
+	// Which of the eight to create and keep updated, indexed by
+	// Widget_Kind. An array rather than eight named bools: the set is the
+	// enum, and a name per entry only invites the two drifting apart.
+	obsws_send: [len(Widget_Kind)]bool `json:"obsws_send"`,
+
+	// OBS text sources have no line-height setting, so the only way to
+	// open a list up is to send the blank line ourselves.
+	obsws_roomy_lines: bool `json:"obsws_roomy_lines"`,
+
+	obsws_region: Region_Choice `json:"obsws_region"`,
+
 	// Per-page appearance overrides for the single-value pages.
 	//
 	// Whole-struct, not per-field: a page either follows ws_look or has a
@@ -257,6 +299,14 @@ Settings :: struct {
 	hide_completed:   bool   `json:"hide_completed"`,
 }
 
+// Ticked by default: everything but Session, which most people won't want
+// on screen and which is the one that starts again every launch.
+obsws_default_send :: proc() -> [len(Widget_Kind)]bool {
+	out: [len(Widget_Kind)]bool
+	for k in Widget_Kind do out[int(k)] = k != .Session
+	return out
+}
+
 default_settings :: proc() -> Settings {
 	return Settings {
 		version = SETTINGS_VERSION,
@@ -275,6 +325,15 @@ default_settings :: proc() -> Settings {
 		overlay_next_count  = 8,
 		overlay_bg          = "none",
 		overlay_card        = "panel",
+
+		obsws_enabled = false,
+		obsws_host    = "127.0.0.1",
+		obsws_port    = 4455,
+		obsws_region  = {mode = "first"},
+		obsws_roomy_lines = true,
+		// Everything except Session, which most people won't want on
+		// screen and which is the one that resets every launch.
+		obsws_send = obsws_default_send(),
 		widget_show_labels  = true,
 		browser_region   = {mode = "first"},
 		text_region      = {mode = "first"},
@@ -393,6 +452,16 @@ load_settings_file :: proc(allocator := context.allocator) -> (s: Settings, err:
 			return s, nil
 		}
 
+		// A password that won't open is one this machine didn't write:
+		// another machine's config, a corrupted file, or a plaintext one
+		// from before this field was encrypted. In every case the right
+		// move is to drop it and let the user type it once more.
+		if plain, ok := sb.decrypt_string(decoded.obsws_password, context.temp_allocator); ok {
+			decoded.obsws_password = plain
+		} else {
+			decoded.obsws_password = ""
+		}
+
 		s = decoded
 		migrate_v5(&s, raw)
 	}
@@ -429,6 +498,11 @@ settings_own_strings :: proc(s: ^Settings, allocator := context.allocator) {
 		&s.overlay_mode,
 		&s.overlay_bg,
 		&s.overlay_card,
+		&s.obsws_host,
+		&s.obsws_password,
+		&s.obsws_scene,
+		&s.obsws_region.mode,
+		&s.obsws_region.name,
 		&s.last_kill_region,
 		&s.obs_text_dir,
 		&s.theme,
@@ -616,6 +690,15 @@ save_settings_file :: proc(s: Settings) -> os.Error {
 	out := s
 	out.version = SETTINGS_VERSION
 
+	// The password is the one field that never goes to disk as typed.
+	// encrypt_string returns "" when this machine can't produce a key, in
+	// which case nothing is stored rather than falling back to plaintext.
+	if out.obsws_remember_password {
+		out.obsws_password = sb.encrypt_string(out.obsws_password, context.temp_allocator)
+	} else {
+		out.obsws_password = ""
+	}
+
 	// Stamp each stored look with the page it belongs to. In memory the
 	// slot's position is what identifies it; on disk the slug is, so a
 	// later build that reorders or renames Widget_Kind can still put
@@ -688,6 +771,10 @@ settings_apply_bounds :: proc(s: ^Settings) {
 	region_choice_apply_bounds(&s.ws_region)
 	appearance_apply_bounds(&s.browser_look)
 	appearance_apply_bounds(&s.ws_look)
+	if s.obsws_port < 1 || s.obsws_port > 65535 do s.obsws_port = 4455
+	if len(s.obsws_host) == 0 do s.obsws_host = "127.0.0.1"
+	region_choice_apply_bounds(&s.obsws_region)
+
 	settings_normalise_widget_looks(s)
 	for &w in s.widget_looks {
 		if w.custom do appearance_apply_bounds(&w.look)

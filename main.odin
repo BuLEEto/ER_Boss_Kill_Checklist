@@ -137,6 +137,7 @@ print_banner :: proc() {
 }
 
 shutdown :: proc() {
+	obsws_disconnect()
 	server_stop(&app.server)
 	if app.save_loaded do close_save_file(&app.save_file)
 	app_save_settings()

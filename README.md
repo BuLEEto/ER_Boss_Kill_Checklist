@@ -24,12 +24,15 @@ beaten — safe to use with EAC.
   and which tab you were on — between restarts
 - Elden Ring colour theme by default (Dark, Light and follow-the-OS also
   available), with an adjustable text size
-- **Two ways into OBS**:
+- **Several ways into OBS**, including one for OBS builds with no Browser
+  source at all:
   - **Browser source** — paste a URL, the way every OBS overlay works. Either
     the whole card in one source, or a page per value to scatter round your
     layout. Styled here, updates live
   - **Text files** — plain text files for OBS "Text (GDI+/FreeType)" sources
     set to *Read from file*. Works on any OBS version, no browser source
+  - **OBS text sources** — creates and updates real text sources in OBS over
+    obs-websocket, for the Linux builds packaged without CEF
 
 - Mobile companion page for single-monitor players
 
@@ -109,13 +112,28 @@ The **OBS** tab has one panel per thing you'd actually add to a scene:
 | **Overlay card** | Everything in one box. One Browser source, one URL. What most people want, and the cheapest — a single browser instance. |
 | **Single values** | A page per value, each its own Browser source, for layouts where the numbers live in different corners. Styled together or one at a time. |
 | **Text files** | Plain files that OBS text sources read. Works on any OBS version, costs nothing, and other tools can read them too. |
+| **OBS text sources** | Connects over obs-websocket and creates real OBS text sources, keeping their text current. For OBS builds that have no Browser source. |
 
-Earlier versions also drove OBS over **obs-websocket**, creating the sources for
-you. That's gone. It never showed anything the browser sources couldn't — in its
-last form it was literally creating browser sources pointed at these same pages
-— and presenting it alongside them made the tab read as competing ways to do one
-job. Copying a URL into a Browser source is the thing every OBS user already
-knows how to do, so that's all there is now.
+### If your OBS has no Browser source
+
+Check **Sources → +**. If there's no *Browser* entry, your OBS was built without
+CEF — the Chromium engine browser sources need. **Debian's and Ubuntu's packaged
+`obs-studio` both are**, and there is no separate package to add: CEF is a large
+prebuilt binary those distributions can't ship. `apt-cache search` turns up
+nothing.
+
+Options, in order of least effort:
+
+1. **OBS text sources** — the last panel. Nothing to install; it drives the text
+   sources your OBS does have.
+2. **Text files** — same idea, but you add the sources yourself and point them
+   at files.
+3. **The Flatpak or Snap build of OBS**, which bundles CEF and has Browser
+   sources. It coexists with the packaged one.
+
+Window-capturing a browser is the other way round it, and fine for the overlay
+card, but it needs a browser window per value — eight of them while you're
+playing isn't a workflow.
 
 Each panel has a **? How do I use this** button with step-by-step OBS
 instructions: which source type to add, where the setting lives, what each
@@ -328,6 +346,9 @@ For Seamless Co-op, the file is `ER0000.co2` under the mod's app ID instead of `
 | `settings.odin` | Config-directory settings, with migration from older builds |
 | `server.odin` | Web server for the OBS overlay and mobile page |
 | `obs_text.odin` | Text-file output for OBS text sources |
+| `obs_ws.odin` | obs-websocket v5 client, for driving OBS text sources |
+| `src/libs/websocket/` | Minimal RFC 6455 client, for obs-websocket |
+| `src/libs/sbcrypto/` | AES-256-GCM at-rest encryption for the saved password |
 | `widgets.odin` | The single-value pages: which exist, and what each shows |
 | `fonts*.odin` | System font enumeration for the font picker |
 | `save_parser.odin` | Elden Ring save file parser (sequential binary format) |

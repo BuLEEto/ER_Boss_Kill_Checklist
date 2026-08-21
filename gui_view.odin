@@ -142,6 +142,13 @@ ID_SHOW_DEATHS    :: "obs.show_deaths"
 ID_OVERLAY_CARD   :: "obs.overlay_card"
 ID_HIDE_CLEARED   :: "obs.hide_cleared"
 ID_WIDGET_LABELS  :: "obs.widget_labels"
+ID_WS_TOGGLE      :: "obs.ws_enabled"
+ID_WS_HOST        :: "obs.ws_host"
+ID_WS_PORT        :: "obs.ws_port"
+ID_WS_PASS        :: "obs.ws_pass"
+ID_WS_REMEMBER    :: "obs.ws_remember"
+ID_WS_SCENE       :: "obs.ws_scene"
+ID_WS_ROOMY       :: "obs.ws_roomy"
 ID_SHOW_ATTEMPTS  :: "obs.show_attempts"
 ID_SHOW_SESSION   :: "obs.show_session"
 ID_KILL_BANNER    :: "obs.kill_banner"
@@ -605,6 +612,7 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	case .Overlay:   panel = view_obs_browser(s, ctx)
 	case .Widgets:   panel = view_obs_widgets(s, ctx)
 	case .Text:      panel = view_obs_text(s, ctx)
+	case .Obs_Text:  panel = view_obs_sources(s, ctx)
 	}
 
 	// A segmented control rather than another tab strip: nesting tabs
@@ -1048,6 +1056,128 @@ on_widget_custom_set :: proc(kind: Widget_Kind, on: bool) -> Msg {
 	return Widget_Style_Custom_Set{kind = kind, custom = on}
 }
 
+// ---------------------------------------------------------------------------
+// OBS text sources, over obs-websocket
+//
+// For the OBS builds with no Browser source: Debian and Ubuntu package OBS
+// without CEF, so a page is not an option there at all. This creates real
+// OBS text sources and keeps their text current.
+// ---------------------------------------------------------------------------
+
+view_obs_sources :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
+	th := ctx.theme
+	rows := make([dynamic]skald.View, context.temp_allocator)
+
+	append(&rows, help_row(ctx,
+		"Creates OBS text sources and keeps them updated, over OBS's own WebSocket server. The one to use if your OBS has no Browser source — Debian and Ubuntu package it without one.",
+		.Obs_Sources,
+	))
+	append(&rows, skald.toggle(ctx, app.settings.obsws_enabled, "Connect to OBS", on_obsws_set,
+		id = skald.hash_id(ID_WS_TOGGLE)))
+	append(&rows, skald.row(
+		skald.text("Host", th.color.fg_muted, th.font.size_sm),
+		skald.text_input(ctx, s.obsws_host_draft, on_obsws_host, width = 160,
+			id = skald.hash_id(ID_WS_HOST)),
+		skald.text("Port", th.color.fg_muted, th.font.size_sm),
+		skald.text_input(ctx, s.obsws_port_draft, on_obsws_port, width = 90,
+			id = skald.hash_id(ID_WS_PORT)),
+		spacing     = th.spacing.sm,
+		cross_align = .Center,
+	))
+	append(&rows, skald.row(
+		skald.text("Password", th.color.fg_muted, th.font.size_sm),
+		skald.text_input(ctx, s.obsws_pass_draft, on_obsws_pass, width = 220, password = true,
+			id = skald.hash_id(ID_WS_PASS)),
+		skald.button(ctx, "Connect", Msg(Obsws_Connect_Requested{})),
+		spacing     = th.spacing.sm,
+		cross_align = .Center,
+	))
+	append(&rows, skald.checkbox(
+		ctx, app.settings.obsws_remember_password,
+		"Remember the password (encrypted, tied to this machine)",
+		on_obsws_remember, id = skald.hash_id(ID_WS_REMEMBER),
+	))
+
+	status, state := obsws_status_text()
+	status_colour := th.color.fg_muted
+	switch state {
+	case .Connected: status_colour = th.color.success
+	case .Failed:    status_colour = th.color.danger
+	case .Connecting, .Disconnected: // muted
+	}
+	append(&rows, skald.text(status, status_colour, th.font.size_sm))
+
+	scenes := obsws_scene_names()
+	chosen := app.settings.obsws_scene
+	append(&rows, skald.spacer(th.spacing.sm))
+	append(&rows, skald.form_row(ctx, "Add to scene",
+		skald.select(
+			ctx, len(chosen) > 0 ? chosen : OBSWS_SCENE_NONE_LABEL, scenes, on_obsws_scene,
+			width = 280, placeholder = OBSWS_SCENE_NONE_LABEL,
+			id = skald.hash_id(ID_WS_SCENE),
+		),
+		label_width = 120,
+	))
+	switch {
+	case len(scenes) == 0:
+		append(&rows, paragraph(ctx,
+			"Connect and your scenes will be listed here. Nothing is created until you pick one.",
+			th.color.fg_muted, th.font.size_xs,
+		))
+	case len(chosen) == 0:
+		append(&rows, paragraph(ctx,
+			"Pick the scene the sources should go in. Nothing is created until you do — otherwise they'd land in whichever scene happened to be live when the app connected, which is a nasty surprise if that was your Starting Soon scene.",
+			th.color.warning, th.font.size_xs,
+		))
+	case:
+		append(&rows, paragraph(ctx,
+			fmt.tprintf("New sources are created in %s. Change it and the app reconnects and adds them to the new scene; the copies in the old one are left alone.", chosen),
+			th.color.fg_muted, th.font.size_xs,
+		))
+	}
+
+	append(&rows, skald.spacer(th.spacing.sm))
+	append(&rows, skald.section_header(ctx, "Which to create"))
+	for kind in Widget_Kind {
+		append(&rows, skald.row(
+			skald.col(
+				skald.checkbox(
+					ctx, obsws_sends(kind), widget_label(kind),
+					kind, on_obsws_send_toggled,
+					id = skald.hash_id(fmt.tprintf("obsws.send.%s", widget_slug(kind))),
+				),
+				width = 150,
+			),
+			skald.flex(1, skald.text(widget_preview(kind), th.color.fg_muted, th.font.size_xs)),
+			spacing     = th.spacing.sm,
+			cross_align = .Center,
+		))
+	}
+	append(&rows, paragraph(ctx,
+		"Created as \"ER Progress\", \"ER Deaths\" and so on, stacked down the left, in a bold white font with an outline so they're legible from the moment they appear. Restyle and reposition them in OBS however you like — the app only ever changes their text, and never touches a source that already exists.\n\nUnticking hides the source rather than deleting it, so whatever you set up survives.",
+		th.color.fg_muted, th.font.size_xs,
+	))
+
+	append(&rows, skald.spacer(th.spacing.sm))
+	for v in view_region_control(ctx, .Obs, "obsws.region") do append(&rows, v)
+	append(&rows, skald.checkbox(
+		ctx, app.settings.obsws_roomy_lines,
+		"Blank line between entries in the multi-line sources",
+		on_obsws_roomy, id = skald.hash_id(ID_WS_ROOMY),
+	))
+	append(&rows, paragraph(ctx,
+		"OBS text sources have no line-height setting, in either flavour, so sending the extra line is the only way to open a list up.",
+		th.color.fg_muted, th.font.size_xs,
+	))
+
+	return skald.scroll(ctx, {0, 0}, skald.col(
+		..rows[:],
+		spacing     = th.spacing.sm,
+		padding     = SCROLL_GUTTER,
+		cross_align = .Stretch,
+	))
+}
+
 view_copy_row :: proc(ctx: ^skald.Ctx(Msg), label, value: string) -> skald.View {
 	th := ctx.theme
 	return skald.form_row(ctx, label,
@@ -1269,6 +1399,16 @@ on_boss_list_selected :: proc(label: string) -> Msg {
 
 on_poll_rate :: proc(v: f32) -> Msg { return Poll_Rate_Changed(int(v + 0.5)) }
 on_show_deaths :: proc(v: bool) -> Msg { return Show_Deaths_Set(v) }
+on_obsws_set :: proc(v: bool) -> Msg { return Obsws_Set(v) }
+on_obsws_host :: proc(v: string) -> Msg { return Obsws_Host_Draft(v) }
+on_obsws_port :: proc(v: string) -> Msg { return Obsws_Port_Draft(v) }
+on_obsws_pass :: proc(v: string) -> Msg { return Obsws_Pass_Draft(v) }
+on_obsws_remember :: proc(v: bool) -> Msg { return Obsws_Remember_Set(v) }
+on_obsws_roomy :: proc(v: bool) -> Msg { return Obsws_Roomy_Set(v) }
+on_obsws_scene :: proc(label: string) -> Msg { return Obsws_Scene_Selected(label) }
+on_obsws_send_toggled :: proc(kind: Widget_Kind, on: bool) -> Msg {
+	return Obsws_Send_Toggled{kind = kind, on = on}
+}
 on_hide_cleared :: proc(v: bool) -> Msg { return Hide_Cleared_Set(v) }
 on_widget_labels :: proc(v: bool) -> Msg { return Widget_Labels_Set(v) }
 on_overlay_card :: proc(i: int) -> Msg {

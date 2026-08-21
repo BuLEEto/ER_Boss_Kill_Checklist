@@ -35,9 +35,12 @@ Obs_Tab :: enum {
 	Overlay,
 	Widgets,
 	Text,
+	Obs_Text,
 }
 
-OBS_TAB_LABELS :: [?]string{"Overlay card", "Single values", "Text files"}
+OBS_TAB_LABELS :: [?]string{
+	"Overlay card", "Single values", "Text files", "OBS text sources",
+}
 
 Gui :: struct {
 	// Set false until the first frame has asked for the poll loop to
@@ -63,6 +66,10 @@ Gui :: struct {
 	port_draft:         string,
 	obs_text_dir_draft: string,
 	custom_css_draft:   [Look_Target]string,
+
+	obsws_host_draft: string,
+	obsws_port_draft: string,
+	obsws_pass_draft: string,
 
 	// Purely view state — which single-value page's style dialog is open.
 	widget_style_open: Maybe(Widget_Kind),
@@ -134,6 +141,20 @@ Attempts_Reset :: struct {}
 Session_Reset :: struct {}
 // Which single-value page's style dialog is open. A Maybe rather than a
 // bool plus a kind: "open, for nothing in particular" isn't a state.
+Obsws_Set :: distinct bool
+Obsws_Host_Draft :: distinct string
+Obsws_Port_Draft :: distinct string
+Obsws_Pass_Draft :: distinct string
+Obsws_Remember_Set :: distinct bool
+Obsws_Connect_Requested :: struct {}
+Obsws_Scene_Selected :: distinct string
+Obsws_Send_Toggled :: struct { kind: Widget_Kind, on: bool }
+Obsws_Roomy_Set :: distinct bool
+Obsws_Status_Changed :: struct {
+	connected: bool,
+	message:   string, // heap; the handler frees it
+}
+
 Widget_Style_Opened :: distinct Widget_Kind
 Widget_Style_Closed :: struct {}
 Widget_Style_Custom_Set :: struct { kind: Widget_Kind, custom: bool }
@@ -217,6 +238,16 @@ Msg :: union {
 	Kill_Banner_Secs,
 	Attempts_Reset,
 	Session_Reset,
+	Obsws_Set,
+	Obsws_Host_Draft,
+	Obsws_Port_Draft,
+	Obsws_Pass_Draft,
+	Obsws_Remember_Set,
+	Obsws_Connect_Requested,
+	Obsws_Scene_Selected,
+	Obsws_Send_Toggled,
+	Obsws_Roomy_Set,
+	Obsws_Status_Changed,
 	Widget_Style_Opened,
 	Widget_Style_Closed,
 	Widget_Style_Custom_Set,
@@ -271,6 +302,9 @@ gui_init :: proc() -> Gui {
 	g.win = saved_window_state()
 
 	g.port_draft         = fmt.aprintf("%d", app.settings.server_port)
+	g.obsws_port_draft   = fmt.aprintf("%d", app.settings.obsws_port)
+	g.obsws_host_draft   = strings.clone(app.settings.obsws_host)
+	g.obsws_pass_draft   = strings.clone(app.settings.obsws_password)
 	g.obs_text_dir_draft = strings.clone(app.settings.obs_text_dir)
 	for t in Look_Target {
 		look := settings_look(t)^
@@ -303,6 +337,12 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 
 		// Reconnect to OBS if that's how the app was left. Doing it here
 		// rather than in main() keeps the socket work on a worker.
+		if app.settings.obsws_enabled {
+			return out, skald.cmd_batch(
+				skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker),
+				skald.cmd_delay(f32(app.settings.poll_seconds), Msg(Tick{})),
+			)
+		}
 		return out, skald.cmd_delay(f32(app.settings.poll_seconds), Msg(Tick{}))
 
 	case Tab_Selected:
@@ -469,6 +509,92 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		app_reset_session()
 		out = gui_after_data_change(out)
 		out = gui_toast(out, "Session counters reset", .Success)
+
+	case Obsws_Set:
+		sync.guard(&app.mu)
+		app.settings.obsws_enabled = bool(v)
+		app_save_settings()
+		if !bool(v) {
+			obsws_disconnect()
+			return out, {}
+		}
+		// Connecting talks to a socket, so it goes to a worker — OBS being
+		// slow or absent must not freeze the window.
+		return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
+
+	case Obsws_Host_Draft:
+		delete(out.obsws_host_draft)
+		out.obsws_host_draft = strings.clone(string(v))
+
+	case Obsws_Port_Draft:
+		delete(out.obsws_port_draft)
+		out.obsws_port_draft = strings.clone(string(v))
+
+	case Obsws_Pass_Draft:
+		delete(out.obsws_pass_draft)
+		out.obsws_pass_draft = strings.clone(string(v))
+
+	case Obsws_Remember_Set:
+		sync.guard(&app.mu)
+		app.settings.obsws_remember_password = bool(v)
+		app_save_settings()
+
+	case Obsws_Connect_Requested:
+		port, ok := strconv.parse_int(strings.trim_space(out.obsws_port_draft))
+		if !ok || port < 1 || port > 65535 {
+			out = gui_toast(out, "obs-websocket port must be between 1 and 65535", .Danger)
+			return out, {}
+		}
+		sync.guard(&app.mu)
+		settings_set_string(&app.settings.obsws_host, strings.trim_space(out.obsws_host_draft))
+		app.settings.obsws_port = port
+		settings_set_string(&app.settings.obsws_password, out.obsws_pass_draft)
+		app.settings.obsws_enabled = true
+		app_save_settings()
+		return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
+
+	case Obsws_Scene_Selected:
+		sync.guard(&app.mu)
+		// The placeholder is a label, not a scene. Empty means "not
+		// chosen", and nothing is created in that state.
+		scene := string(v)
+		if scene == OBSWS_SCENE_NONE_LABEL do scene = ""
+		if scene == app.settings.obsws_scene do return out, {}
+
+		settings_set_string(&app.settings.obsws_scene, scene)
+		app_save_settings()
+		if !app.settings.obsws_enabled do return out, {}
+
+		// Moving sources needs request/response traffic, and once
+		// connected the reader thread owns the socket — two threads in
+		// ws.receive on one connection is a race. Reconnecting gets a
+		// clean run at it through the path that already does this.
+		return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
+
+	case Obsws_Send_Toggled:
+		sync.guard(&app.mu)
+		app.settings.obsws_send[int(v.kind)] = v.on
+		app_save_settings()
+		if app.settings.obsws_enabled {
+			// Reconnect so a newly ticked source is actually created, and
+			// an unticked one hidden.
+			return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
+		}
+
+	case Obsws_Roomy_Set:
+		sync.guard(&app.mu)
+		app.settings.obsws_roomy_lines = bool(v)
+		app_save_settings()
+		out = gui_after_data_change(out)
+
+	case Obsws_Status_Changed:
+		if len(v.message) > 0 {
+			out = gui_toast(out, v.message, v.connected ? .Success : .Danger)
+			delete(v.message)
+		}
+		// Seed the sources from here rather than from the connect worker:
+		// pushing reads the boss list, and only the GUI thread may do that.
+		if v.connected do obsws_push_update()
 
 	case Widget_Style_Opened:
 		out.widget_style_open = Widget_Kind(v)
@@ -828,6 +954,9 @@ gui_after_data_change :: proc(s: Gui) -> Gui {
 		if err := obs_text_write_all(); err != nil {
 			fmt.eprintfln("OBS text output failed: %v", err)
 		}
+	}
+	if app.settings.obsws_enabled {
+		obsws_push_update()
 	}
 	return s
 }

@@ -69,6 +69,7 @@ Region_Target :: enum {
 	Browser,
 	Text,
 	Widget,
+	Obs, // the OBS text sources
 }
 
 
@@ -85,6 +86,7 @@ settings_region :: proc(t: Region_Target) -> ^Region_Choice {
 	case .Browser:   return &app.settings.browser_region
 	case .Text:      return &app.settings.text_region
 	case .Widget:  return &app.settings.ws_region
+	case .Obs:     return &app.settings.obsws_region
 	}
 	return &app.settings.browser_region
 }

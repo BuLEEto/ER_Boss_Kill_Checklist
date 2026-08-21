@@ -20,6 +20,7 @@ Help_Topic :: enum {
 	Browser_Source,
 	Text_Files,
 	Single_Values,
+	Obs_Sources,
 }
 
 Help_Step :: struct {
@@ -32,6 +33,7 @@ help_title :: proc(topic: Help_Topic) -> string {
 	case .Browser_Source: return "Using the browser source"
 	case .Text_Files:     return "Using the text files"
 	case .Single_Values:  return "Using the single-value pages"
+	case .Obs_Sources:    return "Driving OBS text sources"
 	case .None:           return ""
 	}
 	return ""
@@ -43,6 +45,9 @@ help_intro :: proc(topic: Help_Topic) -> string {
 		return "The main way to get this on stream, and the one every OBS user already knows: paste a URL into a Browser source. OBS renders the page itself, styled and laid out here, updating live — there's no refresh interval to set.\n\nTwo shapes: the overlay card, which is everything in one box, and a page per value for when you want the numbers in different corners of your layout."
 	case .Text_Files:
 		return "The most compatible option. The app keeps a folder of small text files up to date, and OBS text sources read straight from them. No browser source, no extra CPU, and it works on every version of OBS."
+	case .Obs_Sources:
+		return "For the OBS builds that have no Browser source at all — Debian and Ubuntu package OBS without CEF, so the browser-source panels are no use on them. This connects to OBS's own WebSocket server and creates real OBS text sources instead, keeping their text current as you play.\n\nWindow-capturing a browser is the other way round it, but that needs a browser window per value, and eight of them while you're playing isn't a workflow."
+
 	case .Single_Values:
 		return "One page per value, each added to OBS as its own Browser source. Use these when you want the numbers spread around your layout rather than gathered in one card — a deaths counter in one corner, the boss list in another.\n\nThey're the same technology as the overlay card, so they get the same things an OBS text source can't do: real alignment, a line height you can set, and colours and fonts chosen here rather than per-source in OBS."
 	case .None:
@@ -130,6 +135,42 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 		)
 
+	case .Obs_Sources:
+		append(&steps,
+			Help_Step{
+				"Turn on the WebSocket server in OBS",
+				"OBS → Tools → WebSocket Server Settings → tick Enable WebSocket server. Note the port, 4455 by default.",
+			},
+			Help_Step{
+				"Get the password",
+				"Show Connect Info in that same dialog reveals it. Leave the password disabled in OBS and you can skip this.",
+			},
+			Help_Step{
+				"Fill it in here and press Connect",
+				"Host stays 127.0.0.1 if OBS is on this machine. Tick Remember the password to skip re-typing it — it's encrypted before it goes to disk, and tied to this machine, so a copied settings file is inert.",
+			},
+			Help_Step{
+				"Choose the scene — nothing happens until you do",
+				"Add to scene decides where the sources are created, and it's deliberately not optional. Until you pick one the app connects and creates nothing: dropping eight sources into whichever scene happened to be live is exactly the sort of thing you'd discover mid-stream.",
+			},
+			Help_Step{
+				"Pick which values you want",
+				"Only ticked ones are created. They appear as \"ER Progress\", \"ER Deaths\" and so on, stacked down the left in a bold white font with an outline, so they're legible from the moment they show up.",
+			},
+			Help_Step{
+				"Style and place them in OBS",
+				"They're ordinary text sources — change the font, colour, size and position however you like. The app only ever sets their text, and never touches a source that already exists, so nothing you set up gets overwritten. Unticking hides a source rather than deleting it, because OBS has no undo for a deleted source.",
+			},
+			Help_Step{
+				"Why these aren't styled in the app",
+				"The served pages are styled here because they're ours to draw. These are OBS's own sources, so OBS is where they're styled — and it's the right place, since each one already has its own font and colour controls.\n\nThe one thing OBS text sources can't do is line height, which is why multi-line lists have the \"Blank line between entries\" option.",
+			},
+			Help_Step{
+				"If you also have Browser sources",
+				"Then you probably don't want this panel: copying a URL from Overlay card or Single values gives you real alignment, line height and colours. This exists for the builds where that isn't on the menu.",
+			},
+		)
+
 	case .Single_Values:
 		append(&steps,
 			Help_Step{
@@ -180,6 +221,9 @@ help_footer :: proc(topic: Help_Topic) -> string {
 	switch topic {
 	case .Text_Files:
 		return "Text files and browser sources can run at the same time — they don't conflict, and plenty of people use both."
+	case .Obs_Sources:
+		return "If Connect fails, check the WebSocket server is enabled in OBS and that the port matches."
+
 	case .Single_Values:
 		return "If a page is blank, check the web server is running — the status is on the Overlay card panel."
 	case .Browser_Source:
