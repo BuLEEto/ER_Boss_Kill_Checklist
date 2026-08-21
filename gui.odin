@@ -62,7 +62,6 @@ Gui :: struct {
 	obsws_host_draft:   string,
 	obsws_port_draft:   string,
 	obsws_pass_draft:   string,
-	font_family_draft:  [Look_Target]string,
 	custom_css_draft:   [Look_Target]string,
 
 	// Save-file polling
@@ -156,8 +155,7 @@ Look_Text_Set :: struct { target: Look_Target, hex: string }
 Look_Size_Set :: struct { target: Look_Target, size: int }
 Look_Outline_Set :: struct { target: Look_Target, on: bool }
 Look_Align_Set :: struct { target: Look_Target, align: string }
-Look_Font_Draft :: struct { target: Look_Target, text: string }
-Look_Font_Committed :: struct { target: Look_Target }
+Look_Font_Set :: struct { target: Look_Target, name: string }
 Look_Css_Draft :: struct { target: Look_Target, text: string }
 Look_Css_Committed :: struct { target: Look_Target }
 Look_Reset :: struct { target: Look_Target }
@@ -237,8 +235,7 @@ Msg :: union {
 	Look_Size_Set,
 	Look_Outline_Set,
 	Look_Align_Set,
-	Look_Font_Draft,
-	Look_Font_Committed,
+	Look_Font_Set,
 	Look_Css_Draft,
 	Look_Css_Committed,
 	Look_Reset,
@@ -278,7 +275,6 @@ gui_init :: proc() -> Gui {
 	g.obs_text_dir_draft = strings.clone(app.settings.obs_text_dir)
 	for t in Look_Target {
 		look := settings_look(t)^
-		g.font_family_draft[t] = strings.clone(look.font_family)
 		g.custom_css_draft[t] = strings.clone(look.custom_css)
 	}
 
@@ -459,11 +455,11 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 
 	case Obsws_Scene_Selected:
 		sync.guard(&app.mu)
+		// The picker only offers real scene names now, but guard the
+		// placeholder anyway — an empty setting means "not chosen", and a
+		// scene actually called that must not be mistaken for one.
 		scene := string(v)
-		// The sentinel is a label, not a scene name. Store it as empty so
-		// "follow whatever's live" keeps meaning that even if OBS gains a
-		// scene actually called that.
-		if scene == OBSWS_SCENE_CURRENT_LABEL do scene = ""
+		if scene == OBSWS_SCENE_NONE_LABEL do scene = ""
 		if scene == app.settings.obsws_scene do return out, {}
 
 		settings_set_string(&app.settings.obsws_scene, scene)
@@ -604,16 +600,13 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		app_save_settings()
 		out = gui_theme_changed(out)
 
-	case Look_Font_Draft:
-		delete(out.font_family_draft[v.target])
-		out.font_family_draft[v.target] = strings.clone(v.text)
-
-	case Look_Font_Committed:
+	case Look_Font_Set:
 		sync.guard(&app.mu)
-		settings_set_string(
-			&settings_look(v.target).font_family,
-			strings.trim_space(out.font_family_draft[v.target]),
-		)
+		// The picker's first row is a label, not a font. Empty means "use
+		// the page's own stack", which is what the CSS falls back to.
+		name := strings.trim_space(v.name)
+		if name == FONT_DEFAULT_LABEL do name = ""
+		settings_set_string(&settings_look(v.target).font_family, name)
 		app_save_settings()
 		out = gui_theme_changed(out)
 
@@ -631,7 +624,12 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 
 	case Look_Reset:
 		sync.guard(&app.mu)
-		defaults := default_appearance()
+		// Per target: the overlay card and a widget source start at very
+		// different sizes, so one default_appearance() would put the card
+		// back to the widgets' 28px rather than its own.
+		defaults := v.target == .Browser \
+			? default_browser_appearance() \
+			: default_appearance()
 		look := settings_look(v.target)
 		settings_set_string(&look.accent, defaults.accent)
 		settings_set_string(&look.text_color, defaults.text_color)
@@ -642,8 +640,6 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		look.outline = defaults.outline
 		app_save_settings()
 
-		delete(out.font_family_draft[v.target])
-		out.font_family_draft[v.target] = strings.clone("")
 		delete(out.custom_css_draft[v.target])
 		out.custom_css_draft[v.target] = strings.clone("")
 		out = gui_theme_changed(out)

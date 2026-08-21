@@ -185,18 +185,34 @@ view_appearance :: proc(
 		),
 		label_width = 120,
 	))
+	// Enumerating fonts costs a subprocess on Linux and a GDI walk on
+	// Windows, so it's done once on a worker the first time anyone opens
+	// an Appearance panel. Until it lands this returns a short built-in
+	// list, and the picker fills out on a later frame.
+	font_families_begin_load()
+
+	fonts := make([dynamic]string, context.temp_allocator)
+	append(&fonts, FONT_DEFAULT_LABEL)
+	for f in font_families() do append(&fonts, f)
+
+	font_value := len(look.font_family) > 0 ? look.font_family : FONT_DEFAULT_LABEL
+
 	append(&rows, skald.form_row(ctx, "Font",
-		skald.row(
-			skald.text_input(
-				ctx, s.font_family_draft[t], t, on_font_family_draft,
-				placeholder = "default", width = 220,
-				id = skald.hash_id(fmt.tprintf("%s.font", prefix)),
-			),
-			skald.button(ctx, "Apply", Msg(Look_Font_Committed{target = t})),
-			spacing     = th.spacing.sm,
-			cross_align = .Center,
+		skald.combobox(
+			ctx, font_value, fonts[:], t, on_font_family_set,
+			width = 260, placeholder = FONT_DEFAULT_LABEL,
+			// free_form, because the page is rendered by OBS: if OBS is on
+			// another PC the font that matters is installed there, not
+			// here, and it won't be in this list.
+			free_form = true,
+			max_rows  = 12,
+			id        = skald.hash_id(fmt.tprintf("%s.font", prefix)),
 		),
 		label_width = 120,
+	))
+	append(&rows, paragraph(ctx,
+		"Fonts installed on this PC. OBS renders the page, so if OBS runs on another machine type the name as it's spelled there — anything you type is accepted.",
+		th.color.fg_muted, th.font.size_xs,
 	))
 	append(&rows, skald.checkbox(
 		ctx, look.outline, "Dark outline behind the text",
@@ -265,8 +281,8 @@ on_look_align :: proc(t: Look_Target, i: int) -> Msg {
 	}
 	return Look_Align_Set{target = t, align = align}
 }
-on_font_family_draft :: proc(t: Look_Target, v: string) -> Msg {
-	return Look_Font_Draft{target = t, text = v}
+on_font_family_set :: proc(t: Look_Target, v: string) -> Msg {
+	return Look_Font_Set{target = t, name = v}
 }
 on_custom_css_draft :: proc(t: Look_Target, v: string) -> Msg {
 	return Look_Css_Draft{target = t, text = v}

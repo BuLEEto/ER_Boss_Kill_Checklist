@@ -882,33 +882,41 @@ view_obs_websocket :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	append(&rows, skald.text(status, status_colour, th.font.size_sm))
 
 	// Scene picker. Populated from OBS, so it only has real names once
-	// we've connected at least once — before that the sentinel is the
-	// only honest option to offer.
+	// we've connected at least once.
 	scenes := obsws_scene_names()
-	scene_options := make([dynamic]string, context.temp_allocator)
-	append(&scene_options, OBSWS_SCENE_CURRENT_LABEL)
-	for sc in scenes do append(&scene_options, sc)
-
-	current_scene := len(app.settings.obsws_scene) > 0 \
-		? app.settings.obsws_scene \
-		: OBSWS_SCENE_CURRENT_LABEL
+	chosen := app.settings.obsws_scene
+	scene_value := len(chosen) > 0 ? chosen : OBSWS_SCENE_NONE_LABEL
 
 	append(&rows, skald.spacer(th.spacing.sm))
 	append(&rows, skald.form_row(ctx, "Add to scene",
 		skald.select(
-			ctx, current_scene, scene_options[:], on_obsws_scene,
-			width = 280, id = skald.hash_id(ID_WS_SCENE),
+			ctx, scene_value, scenes, on_obsws_scene,
+			width = 280, placeholder = OBSWS_SCENE_NONE_LABEL,
+			id = skald.hash_id(ID_WS_SCENE),
 		),
 		label_width = 120,
 	))
-	if len(scenes) == 0 {
+
+	// Nothing is created until a scene is picked, so say so where the
+	// choice is rather than leaving someone waiting for sources that are
+	// never coming.
+	switch {
+	case len(scenes) == 0:
 		append(&rows, paragraph(ctx,
-			"Connect once and your scenes will be listed here.",
+			"Connect and your scenes will be listed here. No sources are created until you pick one.",
 			th.color.fg_muted, th.font.size_xs,
 		))
-	} else {
+	case len(chosen) == 0:
 		append(&rows, paragraph(ctx,
-			"Where new sources are created. Leave it on the default and they land in whichever scene happens to be live when the app connects — which is fine until that's your Starting Soon scene. Changing this reconnects and adds the sources to the scene you pick.",
+			"Pick the scene the sources should go in. Nothing is created until you do — otherwise they'd land in whichever scene happened to be live when the app connected, which is a nasty surprise if that was your Starting Soon scene.",
+			th.color.warning, th.font.size_xs,
+		))
+	case:
+		append(&rows, paragraph(ctx,
+			fmt.tprintf(
+				"New sources are created in %s. Change it and the app reconnects and adds them to the new scene; the copies in the old one are left alone, so delete those in OBS if you don't want them.",
+				chosen,
+			),
 			th.color.fg_muted, th.font.size_xs,
 		))
 	}

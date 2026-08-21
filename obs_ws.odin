@@ -123,10 +123,12 @@ obs_source_enabled :: proc(k: Obs_Source) -> bool {
 	return false
 }
 
-// Shown in the scene picker for "don't pin it, use whatever is on air".
-// Stored as an empty string, so a scene the user later renames — or
-// actually names this — can't be confused for the setting.
-OBSWS_SCENE_CURRENT_LABEL :: "Current scene (whatever's live)"
+// The scene picker's placeholder. An empty obsws_scene means "the user
+// hasn't chosen yet", and in that state the app creates nothing at all —
+// see obsws_prepare_sources. Falling back to the live scene was worse
+// than useless: connect while OBS happens to be on Starting Soon and the
+// sources land there, and you don't find out until you're on air.
+OBSWS_SCENE_NONE_LABEL :: "Choose a scene…"
 
 Obsws_State :: enum {
 	Disconnected,
@@ -168,7 +170,13 @@ obsws_status_text :: proc() -> (text: string, kind: Obsws_State) {
 		return fmt.tprint(g_obs.status), g_obs.state
 	}
 	switch g_obs.state {
-	case .Connected:    return "Connected to OBS", .Connected
+	case .Connected:
+		// Connected but idle is a state worth naming: without a scene the
+		// app updates sources that already exist and creates nothing.
+		if len(g_obs.scene) == 0 {
+			return "Connected — choose a scene to add the sources", .Connected
+		}
+		return fmt.tprintf("Connected to OBS — using scene %s", g_obs.scene), .Connected
 	case .Connecting:   return "Connecting…", .Connecting
 	case .Failed:       return "Not connected", .Failed
 	case .Disconnected: return "Not connected", .Disconnected
@@ -445,7 +453,15 @@ obsws_request :: proc(conn: ^ws.Conn, request_type: string, request_data: string
 @(private = "file")
 obsws_prepare_sources :: proc(conn: ^ws.Conn, want_scene: string) {
 	scenes := obsws_scene_list(conn, context.temp_allocator)
-	scene := obsws_target_scene(conn, want_scene, scenes)
+
+	// Only ever the scene the user picked. No fallback to whatever is on
+	// air: creating seven sources in someone's Starting Soon scene because
+	// that's what OBS happened to be showing is not a helpful default, and
+	// it's the kind of mess you discover mid-stream.
+	scene := ""
+	for sc in scenes {
+		if sc == want_scene { scene = want_scene; break }
+	}
 
 	// The OBS plugin id for a text source, e.g. text_ft2_source_v2 — not
 	// to be confused with the Obs_Source kinds looped over below.
@@ -461,6 +477,10 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn, want_scene: string) {
 	for n, i in scenes do g_obs.scenes[i] = strings.clone(n)
 	sync.mutex_unlock(&g_obs.mu)
 
+	// No scene chosen, or one that has since been renamed or deleted.
+	// Connect anyway — sources that already exist keep being updated,
+	// because SetInputSettings addresses them by name and doesn't care
+	// which scene they're in. Only creation waits for a choice.
 	if len(scene) == 0 || len(input_kind) == 0 do return
 
 	// Ask what already exists before creating anything. Relying on
@@ -530,23 +550,6 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn, want_scene: string) {
 		obsws_place_source(conn, scene, name, 48, y)
 		y += LINE_HEIGHT
 	}
-}
-
-// The scene to build in: the configured one when OBS still has a scene by
-// that name, otherwise whatever is on air.
-//
-// Falling back matters — a scene the user has since renamed or deleted
-// would otherwise send every request to a name OBS doesn't know, and OBS
-// answers that with an error per request rather than anything the user
-// would see. Better to land somewhere visible than nowhere at all.
-@(private = "file")
-obsws_target_scene :: proc(conn: ^ws.Conn, want: string, scenes: []string) -> string {
-	if len(want) > 0 {
-		for sc in scenes {
-			if sc == want do return want
-		}
-	}
-	return obsws_current_scene(conn)
 }
 
 // Add an existing input to a scene as a new scene item. Used when the
@@ -811,16 +814,6 @@ obsws_request_sync :: proc(
 		return d, true
 	}
 	return nil, false
-}
-
-@(private = "file")
-obsws_current_scene :: proc(conn: ^ws.Conn) -> string {
-	d, ok := obsws_request_sync(conn, "GetCurrentProgramScene")
-	if !ok do return ""
-	data := json_object(d, "responseData")
-	// obs-websocket 5.5 renamed this; accept either spelling.
-	if name := json_string(data, "sceneName"); len(name) > 0 do return name
-	return json_string(data, "currentProgramSceneName")
 }
 
 // Pick the platform's text source plugin: text_gdiplus_v3 / _v2 on

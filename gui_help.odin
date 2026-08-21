@@ -146,8 +146,8 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 				"Host stays 127.0.0.1 if OBS is on this machine. Tick Remember the password to skip re-typing it next time — it's encrypted before it's written to disk.",
 			},
 			Help_Step{
-				"Choose the scene first",
-				"Add to scene decides where the sources are created. Leave it on the default and they land in whichever scene is live when the app connects — fine if that's your gameplay scene, less fine if it's Starting Soon. Your scenes are listed once you've connected once; change it later and the app reconnects and adds them to the scene you picked.",
+				"Choose the scene — nothing happens until you do",
+				"Add to scene decides where the sources are created, and it's deliberately not optional. Until you pick one the app connects and creates nothing: dropping eight sources into whichever scene happened to be live is exactly the sort of thing you'd discover mid-stream. Your scenes are listed once you've connected. Change it later and the app reconnects and adds them to the new scene — the copies in the old one are left alone, so delete those in OBS if you don't want them.",
 			},
 			Help_Step{
 				"The sources appear in that scene",
@@ -167,7 +167,7 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 			Help_Step{
 				"Styling them your way (Web)",
-				"Appearance on this panel styles these sources — accent colour, text colour, size, font, outline, and a custom CSS box for anything else. It applies to all of them at once, which OBS can't do: its own Custom CSS box belongs to a single source.\n\nThe overlay card has its own separate Appearance on the Browser source panel, so the two can look different. OBS's box still works on top, per source, and still wins.",
+				"Font lists what's installed on this PC, and you can still type a name that isn't there — worth knowing if OBS is running on a different machine, because it's that machine's fonts the page is rendered with.\n\nAppearance on this panel styles these sources — accent colour, text colour, size, font, outline, and a custom CSS box for anything else. It applies to all of them at once, which OBS can't do: its own Custom CSS box belongs to a single source.\n\nThe overlay card has its own separate Appearance on the Browser source panel, so the two can look different. OBS's box still works on top, per source, and still wins.",
 			},
 			Help_Step{
 				"Aligning them individually",

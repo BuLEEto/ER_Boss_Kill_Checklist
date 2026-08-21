@@ -29,7 +29,7 @@ beaten — safe to use with EAC.
   - **Text files** — plain text files for OBS "Text (GDI+/FreeType)" sources
     set to *Read from file*. Works on any OBS version, no browser source
   - **obs-websocket** — connects to OBS directly and keeps text sources
-    updated, the way most OBS tools work. Pick which scene they go in
+    updated, the way most OBS tools work. You choose which scene they go in
 - Mobile companion page for single-monitor players
 
 ## Building
@@ -212,12 +212,17 @@ works on every OBS version:
 Enable OBS's own WebSocket server (**Tools → WebSocket Server Settings**), then
 enter the host, port and password on the OBS tab and hit **Connect**.
 
-**Add to scene** decides where the sources are created. Leave it on the default
-and they land in whichever scene happens to be live when the app connects —
-which is fine until that's your *Starting Soon* scene. Your scenes are listed
-once you've connected once. Changing it reconnects and adds the sources to the
-scene you picked; the copies in the old scene are left alone, so delete those in
-OBS if you don't want them.
+**Add to scene** decides where the sources are created, and picking one is
+required: until you do, the app connects and creates nothing. Defaulting to
+whichever scene happened to be live would put eight sources in your *Starting
+Soon* scene, and you'd find out on stream. Your scenes are listed once you've
+connected.
+
+Changing it reconnects and adds the sources to the new scene; the copies in the
+old scene are left alone, so delete those in OBS if you don't want them. A scene
+you've since renamed or deleted is treated as "not chosen" — nothing is created,
+and sources that already exist keep updating, because the app addresses those by
+name and doesn't care which scene they're in.
 
 The app creates a text source per ticked entry — `ER Progress`, `ER Next Boss`,
 `ER Deaths`, `ER Attempts`, `ER Session`, `ER Character`, `ER Region` and
@@ -242,7 +247,7 @@ Either way they're separate sources, so you position each one independently.
 whole overlay card in one box. Off by default, since it overlaps the individual
 sources.
 
-**Send to OBS** on the same tab picks which of the seven you want.
+**Send to OBS** on the same tab picks which of them you want.
 
 #### Appearance
 
@@ -253,9 +258,15 @@ on **Browser source**, and the individual widgets have theirs on
 **obs-websocket** (visible when Source style is Web), so the two can look
 different.
 
+**Font** lists the families installed on this PC (via fontconfig on Linux, GDI
+on Windows), filtered as you type. It's also free-form: OBS is what renders the
+page, so if OBS runs on a different machine, type the font name as it's spelled
+*there* — this list is a convenience, not a restriction. The first entry clears
+the setting and leaves the page on its own font stack.
+
 It lives in the app rather than being left to OBS for a specific reason: OBS's
-Custom CSS box belongs to a *single source*. With seven sources, theming
-through OBS means pasting the same rules seven times, and again on every tweak.
+Custom CSS box belongs to a *single source*. With eight sources, theming
+through OBS means pasting the same rules eight times, and again on every tweak.
 The app serves the pages, so one change repaints all of that panel's.
 
 OBS's box still works, and still wins — it's injected after ours — which makes
