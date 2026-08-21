@@ -1,5 +1,5 @@
 APP_NAME := er-boss-checklist
-VERSION  := 2.0.0
+VERSION  := 2.1.0
 ARCH     := amd64
 
 DEB_DIR := $(APP_NAME)_$(VERSION)_$(ARCH)
@@ -15,7 +15,7 @@ ODIN_FLAGS := -collection:gui=vendor/skald
 # makes them survive a restart from a read-only install.
 DATA_FILES := bosses.json hardlock.json eventflag_bst.txt
 
-.PHONY: all build run debug clean install uninstall deb tar windows zip-win sdl3
+.PHONY: all build run debug clean install uninstall deb tar windows zip-win sdl3 verify-runpath
 
 all: build
 
@@ -28,9 +28,44 @@ all: build
 # a dev tree: with no libSDL3.so.0 sitting there, the loader just carries
 # on to /usr/lib as usual. Set at link time so packaging needs no
 # patchelf.
+#
+# Odin emits that RUNPATH itself, so there is no -rpath flag here. There
+# used to be one, and it never did what it looked like it did:
+#
+#   -extra-linker-flags:"-Wl,-rpath='$$ORIGIN'"
+#
+# Make turns `$$` into `$`, and the single quotes are inside double quotes
+# so the shell treats them as ordinary characters rather than as quoting —
+# leaving `$ORIGIN` to be expanded as a shell variable, which is unset. The
+# linker received `-rpath=''`, and an empty RUNPATH element means "the
+# current working directory". Every release binary therefore searched the
+# cwd for libSDL3.so.0 before the system paths, so running the app from a
+# directory someone else can write to would load their copy. The bundling
+# had been working on Odin's own $ORIGIN the whole time.
+#
+# verify-runpath asserts both halves of that: $ORIGIN present, no empty
+# element. It fails the build rather than letting either regress unseen.
 build:
-	odin build . $(ODIN_FLAGS) -o:speed -out:$(APP_NAME) \
-		-extra-linker-flags:"-Wl,-rpath='$$ORIGIN'"
+	odin build . $(ODIN_FLAGS) -o:speed -out:$(APP_NAME)
+	@$(MAKE) --no-print-directory verify-runpath
+
+# The bundle only works because of RUNPATH, and a silently missing one
+# would only show up as "won't start" on a machine without system SDL3 —
+# which is exactly the machine the bundle exists for, and not one we build
+# on. Cheap to assert here instead.
+verify-runpath:
+	@rp=$$(readelf -d $(APP_NAME) | awk -F'[][]' '/R(UN)?PATH/ {print $$2}'); \
+	case "$$rp" in \
+	  *'$$ORIGIN'*) ;; \
+	  *) echo "RUNPATH is '$$rp' — expected it to contain \$$ORIGIN."; \
+	     echo "The bundled libSDL3.so.0 will not be found on a machine without system SDL3."; \
+	     exit 1 ;; \
+	esac; \
+	case "$$rp" in \
+	  :*|*::*|*:) echo "RUNPATH is '$$rp' — it has an empty element, which means the current"; \
+	     echo "working directory is searched for libraries. Remove it."; \
+	     exit 1 ;; \
+	esac
 
 debug:
 	odin build . $(ODIN_FLAGS) -debug -out:$(APP_NAME)
