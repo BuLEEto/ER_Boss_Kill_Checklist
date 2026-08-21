@@ -459,7 +459,7 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn, p: Obsws_Connect_Params) {
 		// have browser sources is better served by copying a URL from the
 		// Overlay card or Single values panel.
 		kind_id := input_kind
-		settings := obsws_style_settings(input_kind, p.look, with_text = true)
+		settings := obsws_style_settings(input_kind, p.look, OBS_STYLE_ALL, with_text = true)
 
 		b := strings.builder_make(context.temp_allocator)
 		strings.write_string(&b, `{"sceneName":"`)
@@ -557,41 +557,79 @@ obsws_active_scene :: proc(allocator := context.temp_allocator) -> string {
 // "overlay":true, which merges, so pushing style alone leaves the current
 // value on screen untouched.
 @(private = "file")
-obsws_style_settings :: proc(kind: string, look: Obs_Text_Look, with_text: bool) -> string {
-	face := look.font_family
-	if len(face) == 0 {
-		// Each plugin's own sensible default rather than one shared name
-		// that only exists on one platform.
-		face = strings.has_prefix(kind, "text_gdiplus") ? "Arial" : "Sans Serif"
+// Which parts of the look to send.
+//
+// A control only overwrites what it governs. Nudging the size used to
+// resend colour and outline as well, so a source you'd turned red by hand
+// in OBS went back to white because you moved a slider that had nothing to
+// do with colour. Font, colour and outline travel separately now.
+//
+// Font is one unit because OBS replaces a nested object wholesale rather
+// than merging into it — face, size and style have to go together or the
+// two you didn't send are lost.
+Obs_Style_Part :: enum { Font, Colour, Outline }
+Obs_Style_Parts :: bit_set[Obs_Style_Part]
+
+OBS_STYLE_ALL :: Obs_Style_Parts{.Font, .Colour, .Outline}
+
+obsws_style_settings :: proc(
+	kind:      string,
+	look:      Obs_Text_Look,
+	parts:     Obs_Style_Parts,
+	with_text: bool,
+) -> string {
+	gdi := strings.has_prefix(kind, "text_gdiplus")
+
+	// Collected as fragments and joined, so an omitted part can't leave a
+	// stray comma behind — which would be malformed JSON, and OBS discards
+	// those without a word.
+	frags := make([dynamic]string, context.temp_allocator)
+
+	if with_text do append(&frags, `"text":""`)
+
+	if .Colour in parts {
+		colour := obsws_abgr(look.color)
+		if gdi {
+			append(&frags, fmt.tprintf(`"color":%d`, colour))
+		} else {
+			// color1/color2 are the ends of a gradient; the same value in
+			// both is a flat fill.
+			append(&frags, fmt.tprintf(`"color1":%d,"color2":%d`, colour, colour))
+		}
 	}
-	style := look.bold ? "Bold" : "Regular"
-	colour := obsws_abgr(look.color)
 
-	b := strings.builder_make(context.temp_allocator)
-	strings.write_string(&b, "{")
-	if with_text do strings.write_string(&b, `"text":"",`)
-
-	if strings.has_prefix(kind, "text_gdiplus") {
-		fmt.sbprintf(&b, `"color":%d,"outline":%s,`, colour, look.outline ? "true" : "false")
-		// Black outline at 2px. Not exposed: an outline colour and width
-		// is two more controls for something that only ever wants to be a
-		// dark edge that keeps text off the gameplay behind it.
-		strings.write_string(&b, `"outline_color":4278190080,"outline_size":2,`)
-	} else {
-		// color1/color2 are the ends of a gradient; the same value in both
-		// is a flat fill.
-		fmt.sbprintf(&b, `"color1":%d,"color2":%d,"outline":%s,`,
-			colour, colour, look.outline ? "true" : "false")
+	if .Outline in parts {
+		append(&frags, fmt.tprintf(`"outline":%s`, look.outline ? "true" : "false"))
+		if gdi {
+			// Black outline at 2px. Not exposed: an outline colour and
+			// width is two more controls for something that only ever
+			// wants to be a dark edge holding the text off the gameplay.
+			append(&frags, `"outline_color":4278190080,"outline_size":2`)
+		}
 	}
 
-	strings.write_string(&b, `"font":{"face":"`)
-	json_escape_string(&b, face)
-	// Four braces, not two: sbprintf treats {{ and }} as escapes, so `}}`
-	// emits a single `}` — one short of the two needed to close the font
-	// object and the settings object. The short version produced malformed
-	// JSON, which OBS drops on the floor without a word.
-	fmt.sbprintf(&b, `","size":%d,"style":"%s","flags":0}}}}`, look.font_size, style)
-	return strings.to_string(b)
+	if .Font in parts {
+		face := look.font_family
+		if len(face) == 0 {
+			// Each plugin's own default rather than one shared name that
+			// only exists on one platform.
+			face = gdi ? "Arial" : "Sans Serif"
+		}
+		fb := strings.builder_make(context.temp_allocator)
+		strings.write_string(&fb, `"font":{"face":"`)
+		json_escape_string(&fb, face)
+		// Two braces for one literal `}` — sbprintf reads `}}` as an
+		// escape. This fragment closes the font object only; the
+		// surrounding settings object is added by the tprintf below. It
+		// wanted four when this proc built the whole thing, and getting
+		// that count wrong in either direction produces JSON that OBS
+		// discards without a word.
+		fmt.sbprintf(&fb, `","size":%d,"style":"%s","flags":0}}`,
+			look.font_size, look.bold ? "Bold" : "Regular")
+		append(&frags, strings.to_string(fb))
+	}
+
+	return fmt.tprintf("{{%s}}", strings.join(frags[:], ",", context.temp_allocator))
 }
 
 // "#rrggbb" to the ABGR integer with full alpha that OBS wants.
@@ -613,7 +651,7 @@ obsws_abgr :: proc(hex: string) -> u32 {
 // text as they play, while still letting the panel be the place styling
 // is set. Restyle a source in OBS and it stays that way until you change
 // a control here.
-obsws_push_style :: proc() {
+obsws_push_style :: proc(parts: Obs_Style_Parts) {
 	sync.mutex_lock(&g_obs.send_mu)
 	defer sync.mutex_unlock(&g_obs.send_mu)
 
@@ -631,7 +669,7 @@ obsws_push_style :: proc() {
 		strings.write_string(&b, `{"inputName":"`)
 		json_escape_string(&b, obs_source_name(k))
 		strings.write_string(&b, `","inputSettings":`)
-		strings.write_string(&b, obsws_style_settings(kind, app.settings.obsws_look, with_text = false))
+		strings.write_string(&b, obsws_style_settings(kind, app.settings.obsws_look, parts, with_text = false))
 		strings.write_string(&b, `,"overlay":true}`)
 		obsws_request(conn, "SetInputSettings", strings.to_string(b))
 	}

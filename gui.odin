@@ -605,31 +605,31 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		if name == FONT_DEFAULT_LABEL do name = ""
 		settings_set_string(&app.settings.obsws_look.font_family, name)
 		app_save_settings()
-		obsws_push_style()
+		obsws_push_style({.Font})
 
 	case Obsws_Size_Set:
 		sync.guard(&app.mu)
 		app.settings.obsws_look.font_size = clamp(int(v), 8, 300)
 		app_save_settings()
-		obsws_push_style()
+		obsws_push_style({.Font})
 
 	case Obsws_Color_Set:
 		sync.guard(&app.mu)
 		settings_set_string(&app.settings.obsws_look.color, string(v))
 		app_save_settings()
-		obsws_push_style()
+		obsws_push_style({.Colour})
 
 	case Obsws_Bold_Set:
 		sync.guard(&app.mu)
 		app.settings.obsws_look.bold = bool(v)
 		app_save_settings()
-		obsws_push_style()
+		obsws_push_style({.Font})
 
 	case Obsws_Outline_Set:
 		sync.guard(&app.mu)
 		app.settings.obsws_look.outline = bool(v)
 		app_save_settings()
-		obsws_push_style()
+		obsws_push_style({.Outline})
 
 	case Obsws_Look_Reset:
 		sync.guard(&app.mu)
@@ -640,7 +640,7 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		app.settings.obsws_look.bold = d.bold
 		app.settings.obsws_look.outline = d.outline
 		app_save_settings()
-		obsws_push_style()
+		obsws_push_style(OBS_STYLE_ALL)
 
 	case Obsws_Status_Changed:
 		if len(v.message) > 0 {

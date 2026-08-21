@@ -159,7 +159,7 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 			Help_Step{
 				"Style them from Appearance",
-				"Font, size, colour, bold and outline, set once and pushed to all of them. Doing it in OBS means opening eight property dialogs and setting the same thing eight times, and again every time you change your mind.\n\nOnly sent when you change something on the panel, never during play — so if you'd rather style a source in OBS, it stays that way until you touch a control here.",
+				"Font, size, colour, bold and outline, set once and pushed to all of them. Doing it in OBS means opening eight property dialogs and setting the same thing eight times, and again every time you change your mind.\n\nOnly sent when you change something here, never during play, and only the part you changed: nudging the size doesn't resend the colour. So if you'd rather set one source's colour by hand in OBS, that survives everything except touching Colour on this panel."
 			},
 			Help_Step{
 				"Position them in OBS",
