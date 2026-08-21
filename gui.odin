@@ -39,7 +39,7 @@ Obs_Tab :: enum {
 }
 
 OBS_TAB_LABELS :: [?]string{
-	"Overlay card", "Single values", "Text files", "OBS text sources",
+	"Overlay card", "Single values", "Text files", "obs-websocket",
 }
 
 Gui :: struct {
@@ -150,6 +150,12 @@ Obsws_Connect_Requested :: struct {}
 Obsws_Scene_Selected :: distinct string
 Obsws_Send_Toggled :: struct { kind: Widget_Kind, on: bool }
 Obsws_Roomy_Set :: distinct bool
+Obsws_Font_Set :: distinct string
+Obsws_Size_Set :: distinct int
+Obsws_Color_Set :: distinct string
+Obsws_Bold_Set :: distinct bool
+Obsws_Outline_Set :: distinct bool
+Obsws_Look_Reset :: struct {}
 Obsws_Status_Changed :: struct {
 	connected: bool,
 	message:   string, // heap; the handler frees it
@@ -247,6 +253,12 @@ Msg :: union {
 	Obsws_Scene_Selected,
 	Obsws_Send_Toggled,
 	Obsws_Roomy_Set,
+	Obsws_Font_Set,
+	Obsws_Size_Set,
+	Obsws_Color_Set,
+	Obsws_Bold_Set,
+	Obsws_Outline_Set,
+	Obsws_Look_Reset,
 	Obsws_Status_Changed,
 	Widget_Style_Opened,
 	Widget_Style_Closed,
@@ -586,6 +598,49 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		app.settings.obsws_roomy_lines = bool(v)
 		app_save_settings()
 		out = gui_after_data_change(out)
+
+	case Obsws_Font_Set:
+		sync.guard(&app.mu)
+		name := strings.trim_space(string(v))
+		if name == FONT_DEFAULT_LABEL do name = ""
+		settings_set_string(&app.settings.obsws_look.font_family, name)
+		app_save_settings()
+		obsws_push_style()
+
+	case Obsws_Size_Set:
+		sync.guard(&app.mu)
+		app.settings.obsws_look.font_size = clamp(int(v), 8, 300)
+		app_save_settings()
+		obsws_push_style()
+
+	case Obsws_Color_Set:
+		sync.guard(&app.mu)
+		settings_set_string(&app.settings.obsws_look.color, string(v))
+		app_save_settings()
+		obsws_push_style()
+
+	case Obsws_Bold_Set:
+		sync.guard(&app.mu)
+		app.settings.obsws_look.bold = bool(v)
+		app_save_settings()
+		obsws_push_style()
+
+	case Obsws_Outline_Set:
+		sync.guard(&app.mu)
+		app.settings.obsws_look.outline = bool(v)
+		app_save_settings()
+		obsws_push_style()
+
+	case Obsws_Look_Reset:
+		sync.guard(&app.mu)
+		d := default_obs_text_look()
+		settings_set_string(&app.settings.obsws_look.font_family, d.font_family)
+		settings_set_string(&app.settings.obsws_look.color, d.color)
+		app.settings.obsws_look.font_size = d.font_size
+		app.settings.obsws_look.bold = d.bold
+		app.settings.obsws_look.outline = d.outline
+		app_save_settings()
+		obsws_push_style()
 
 	case Obsws_Status_Changed:
 		if len(v.message) > 0 {

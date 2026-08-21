@@ -158,12 +158,16 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 				"Only ticked ones are created. They appear as \"ER Progress\", \"ER Deaths\" and so on, stacked down the left in a bold white font with an outline, so they're legible from the moment they show up.",
 			},
 			Help_Step{
-				"Style and place them in OBS",
-				"They're ordinary text sources — change the font, colour, size and position however you like. The app only ever sets their text, and never touches a source that already exists, so nothing you set up gets overwritten. Unticking hides a source rather than deleting it, because OBS has no undo for a deleted source.",
+				"Style them from Appearance",
+				"Font, size, colour, bold and outline, set once and pushed to all of them. Doing it in OBS means opening eight property dialogs and setting the same thing eight times, and again every time you change your mind.\n\nOnly sent when you change something on the panel, never during play — so if you'd rather style a source in OBS, it stays that way until you touch a control here.",
 			},
 			Help_Step{
-				"Why these aren't styled in the app",
-				"The served pages are styled here because they're ours to draw. These are OBS's own sources, so OBS is where they're styled — and it's the right place, since each one already has its own font and colour controls.\n\nThe one thing OBS text sources can't do is line height, which is why multi-line lists have the \"Blank line between entries\" option.",
+				"Position them in OBS",
+				"That's never touched. New sources are stacked down the left so they don't land on top of each other; move and scale them however you like and the app won't move them again.\n\nUnticking hides a source rather than deleting it, because OBS has no undo for a deleted source.",
+			},
+			Help_Step{
+				"What isn't here, and why",
+				"Alignment. text_ft2_source_v2 — the text plugin on Linux — hasn't got any, so a control for it would work on Windows and silently do nothing for you. That gap is the reason the browser-source pages exist, where alignment is one CSS rule.\n\nLine height is the same story, which is why multi-line lists get the \"Blank line between entries\" option instead.",
 			},
 			Help_Step{
 				"If you also have Browser sources",

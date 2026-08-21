@@ -58,7 +58,8 @@ POLL_SECONDS_DEFAULT :: 5
 //   8  obs-websocket removed; the single-value pages get per-page looks
 //   9  overlay card panel, hide-cleared, and labels on the value pages
 //  10  obs-websocket back, text sources only, for OBS builds without CEF
-SETTINGS_VERSION :: 10
+//  11  the obs-websocket text sources get a look of their own
+SETTINGS_VERSION :: 11
 
 // Which region an integration follows. One of these per integration
 // rather than one shared between them: the OBS tab has a panel per
@@ -134,6 +135,30 @@ Widget_Look :: struct {
 	slug:   string     `json:"slug"`,
 	custom: bool       `json:"custom"`,
 	look:   Appearance `json:"look"`,
+}
+
+// The styling the OBS text sources get. Maps one-to-one onto what
+// text_gdiplus and text_ft2_source_v2 both understand.
+Obs_Text_Look :: struct {
+	font_family: string `json:"font_family"`, // empty = the plugin's own default
+	font_size:   int    `json:"font_size"`,
+	color:       string `json:"color"`,       // "#rrggbb"
+	bold:        bool   `json:"bold"`,
+	outline:     bool   `json:"outline"`,
+}
+
+default_obs_text_look :: proc() -> Obs_Text_Look {
+	return Obs_Text_Look {
+		font_size = 36,
+		color     = "#ffffff", // white, so it's legible the moment it appears
+		bold      = true,
+		outline   = true,
+	}
+}
+
+obs_text_look_apply_bounds :: proc(l: ^Obs_Text_Look) {
+	if l.font_size < 8 || l.font_size > 300 do l.font_size = 36
+	if !is_hex_colour(l.color) do l.color = "#ffffff"
 }
 
 region_choice_apply_bounds :: proc(r: ^Region_Choice) {
@@ -249,6 +274,16 @@ Settings :: struct {
 
 	obsws_region: Region_Choice `json:"obsws_region"`,
 
+	// How the OBS text sources are drawn.
+	//
+	// Deliberately a smaller set than Appearance: these are OBS's own
+	// sources, not pages we render, so this is exactly what the two text
+	// plugins accept and nothing more. No alignment, because
+	// text_ft2_source_v2 hasn't got any — that's the gap the browser
+	// pages exist to fill, and offering a control that silently only
+	// worked on Windows would be worse than not offering one.
+	obsws_look: Obs_Text_Look `json:"obsws_look"`,
+
 	// Per-page appearance overrides for the single-value pages.
 	//
 	// Whole-struct, not per-field: a page either follows ws_look or has a
@@ -331,6 +366,7 @@ default_settings :: proc() -> Settings {
 		obsws_port    = 4455,
 		obsws_region  = {mode = "first"},
 		obsws_roomy_lines = true,
+		obsws_look        = default_obs_text_look(),
 		// Everything except Session, which most people won't want on
 		// screen and which is the one that resets every launch.
 		obsws_send = obsws_default_send(),
@@ -503,6 +539,8 @@ settings_own_strings :: proc(s: ^Settings, allocator := context.allocator) {
 		&s.obsws_scene,
 		&s.obsws_region.mode,
 		&s.obsws_region.name,
+		&s.obsws_look.font_family,
+		&s.obsws_look.color,
 		&s.last_kill_region,
 		&s.obs_text_dir,
 		&s.theme,
@@ -643,6 +681,13 @@ migrate_settings :: proc(s: ^Settings) {
 		s.widget_show_labels = true
 	}
 
+	// v11 gives the OBS text sources a look. A v10 file decodes to zeroes,
+	// and a zero here means 0px black text with no outline — invisible on
+	// a dark scene, which is not a default anyone chose.
+	if s.version < 11 {
+		s.obsws_look = default_obs_text_look()
+	}
+
 	s.version = SETTINGS_VERSION
 }
 
@@ -774,6 +819,7 @@ settings_apply_bounds :: proc(s: ^Settings) {
 	if s.obsws_port < 1 || s.obsws_port > 65535 do s.obsws_port = 4455
 	if len(s.obsws_host) == 0 do s.obsws_host = "127.0.0.1"
 	region_choice_apply_bounds(&s.obsws_region)
+	obs_text_look_apply_bounds(&s.obsws_look)
 
 	settings_normalise_widget_looks(s)
 	for &w in s.widget_looks {

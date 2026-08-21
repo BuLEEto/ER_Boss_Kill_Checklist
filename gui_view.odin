@@ -149,6 +149,12 @@ ID_WS_PASS        :: "obs.ws_pass"
 ID_WS_REMEMBER    :: "obs.ws_remember"
 ID_WS_SCENE       :: "obs.ws_scene"
 ID_WS_ROOMY       :: "obs.ws_roomy"
+ID_WS_FONT        :: "obs.ws_font"
+ID_WS_SIZE        :: "obs.ws_size"
+ID_WS_COLOR       :: "obs.ws_color"
+ID_WS_BOLD        :: "obs.ws_bold"
+ID_WS_OUTLINE     :: "obs.ws_outline"
+ID_WS_LOOK_RESET  :: "obs.ws_look_reset"
 ID_SHOW_ATTEMPTS  :: "obs.show_attempts"
 ID_SHOW_SESSION   :: "obs.show_session"
 ID_KILL_BANNER    :: "obs.kill_banner"
@@ -1154,7 +1160,7 @@ view_obs_sources :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		))
 	}
 	append(&rows, paragraph(ctx,
-		"Created as \"ER Progress\", \"ER Deaths\" and so on, stacked down the left, in a bold white font with an outline so they're legible from the moment they appear. Restyle and reposition them in OBS however you like — the app only ever changes their text, and never touches a source that already exists.\n\nUnticking hides the source rather than deleting it, so whatever you set up survives.",
+		"Created as \"ER Progress\", \"ER Deaths\" and so on, stacked down the left, styled from Appearance below. Position them in OBS however you like — that's never touched.\n\nUnticking hides the source rather than deleting it, so whatever you set up survives.",
 		th.color.fg_muted, th.font.size_xs,
 	))
 
@@ -1168,6 +1174,73 @@ view_obs_sources :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	append(&rows, paragraph(ctx,
 		"OBS text sources have no line-height setting, in either flavour, so sending the extra line is the only way to open a list up.",
 		th.color.fg_muted, th.font.size_xs,
+	))
+
+	// ---- Appearance ------------------------------------------------------
+	//
+	// A smaller set than the served pages get, because this is what the two
+	// OBS text plugins actually accept. No alignment: text_ft2_source_v2
+	// hasn't got any, and a control that silently only worked on Windows
+	// would be worse than none.
+	look := app.settings.obsws_look
+
+	append(&rows, skald.spacer(th.spacing.sm))
+	append(&rows, skald.section_header(ctx, "Appearance"))
+	append(&rows, paragraph(ctx,
+		"Set here once and pushed to all of them, rather than opened and set eight times in OBS. Only ever sent when you change something on this panel — restyle a source in OBS and it stays that way until you touch a control here.",
+		th.color.fg_muted, th.font.size_xs,
+	))
+
+	font_families_begin_load()
+	fonts := make([dynamic]string, context.temp_allocator)
+	append(&fonts, FONT_DEFAULT_LABEL)
+	for f in font_families() do append(&fonts, f)
+
+	append(&rows, skald.form_row(ctx, "Font",
+		skald.combobox(
+			ctx, len(look.font_family) > 0 ? look.font_family : FONT_DEFAULT_LABEL,
+			fonts[:], on_obsws_font,
+			width = 260, placeholder = FONT_DEFAULT_LABEL,
+			free_form = true, max_rows = 12,
+			id = skald.hash_id(ID_WS_FONT),
+		),
+		label_width = 120,
+	))
+	append(&rows, paragraph(ctx,
+		"Fonts installed on this PC. OBS renders these itself, so if OBS is on another machine type the name as it's spelled there.",
+		th.color.fg_muted, th.font.size_xs,
+	))
+	append(&rows, skald.form_row(ctx, fmt.tprintf("Size %dpx", look.font_size),
+		skald.slider(
+			ctx, f32(look.font_size), on_obsws_size,
+			min_value = 12, max_value = 120, step = 1, width = 220,
+			id = skald.hash_id(ID_WS_SIZE),
+		),
+		label_width = 120,
+	))
+	append(&rows, skald.form_row(ctx, "Colour",
+		skald.color_picker(
+			ctx, hex_to_color(look.color), on_obsws_color,
+			width = 220, id = skald.hash_id(ID_WS_COLOR),
+		),
+		label_width = 120,
+	))
+	append(&rows, skald.checkbox(
+		ctx, look.bold, "Bold", on_obsws_bold, id = skald.hash_id(ID_WS_BOLD),
+	))
+	append(&rows, skald.checkbox(
+		ctx, look.outline, "Dark outline behind the text",
+		on_obsws_outline, id = skald.hash_id(ID_WS_OUTLINE),
+	))
+	// In a row with a flex spacer after it. A bare button as a direct child
+	// of a stretched column gets stretched too, and a full-width "Reset
+	// appearance" reads like the panel's main action rather than the
+	// afterthought it is.
+	append(&rows, skald.row(
+		skald.button(ctx, "Reset appearance", Msg(Obsws_Look_Reset{}),
+			id = skald.hash_id(ID_WS_LOOK_RESET)),
+		skald.flex(1, skald.spacer(0)),
+		cross_align = .Center,
 	))
 
 	return skald.scroll(ctx, {0, 0}, skald.col(
@@ -1405,6 +1478,11 @@ on_obsws_port :: proc(v: string) -> Msg { return Obsws_Port_Draft(v) }
 on_obsws_pass :: proc(v: string) -> Msg { return Obsws_Pass_Draft(v) }
 on_obsws_remember :: proc(v: bool) -> Msg { return Obsws_Remember_Set(v) }
 on_obsws_roomy :: proc(v: bool) -> Msg { return Obsws_Roomy_Set(v) }
+on_obsws_font :: proc(v: string) -> Msg { return Obsws_Font_Set(v) }
+on_obsws_size :: proc(v: f32) -> Msg { return Obsws_Size_Set(int(v + 0.5)) }
+on_obsws_color :: proc(c: skald.Color) -> Msg { return Obsws_Color_Set(color_to_hex(c)) }
+on_obsws_bold :: proc(v: bool) -> Msg { return Obsws_Bold_Set(v) }
+on_obsws_outline :: proc(v: bool) -> Msg { return Obsws_Outline_Set(v) }
 on_obsws_scene :: proc(label: string) -> Msg { return Obsws_Scene_Selected(label) }
 on_obsws_send_toggled :: proc(kind: Widget_Kind, on: bool) -> Msg {
 	return Obsws_Send_Toggled{kind = kind, on = on}

@@ -4,6 +4,7 @@ import "core:crypto/sha2"
 import "core:encoding/base64"
 import "core:encoding/json"
 import "core:fmt"
+import "core:strconv"
 import "core:strings"
 import "core:sync"
 import "core:thread"
@@ -439,7 +440,7 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn, want_scene: string) {
 		// have browser sources is better served by copying a URL from the
 		// Overlay card or Single values panel.
 		kind_id := input_kind
-		settings := obsws_default_text_settings(input_kind)
+		settings := obsws_style_settings(input_kind, with_text = true)
 
 		b := strings.builder_make(context.temp_allocator)
 		strings.write_string(&b, `{"sceneName":"`)
@@ -525,24 +526,98 @@ obsws_active_scene :: proc(allocator := context.temp_allocator) -> string {
 	return strings.clone(g_obs.scene, allocator)
 }
 
+// The styling half of a text source's settings, built from obsws_look.
+//
+// The two plugins don't share a schema — text_gdiplus takes `color` plus
+// outline_color/outline_size, text_ft2_source_v2 takes color1/color2 and
+// has no outline colour of its own. Send each what it understands: OBS
+// ignores keys it doesn't know, but sending the wrong font shape means no
+// font is applied at all.
+//
+// `text` is deliberately absent. Every SetInputSettings here goes with
+// "overlay":true, which merges, so pushing style alone leaves the current
+// value on screen untouched.
 @(private = "file")
-obsws_default_text_settings :: proc(kind: string) -> string {
-	COLOUR :: 4294967295 // 0xFFFFFFFF — white, ABGR with full alpha
+obsws_style_settings :: proc(kind: string, with_text: bool) -> string {
+	look := app.settings.obsws_look
+
+	face := look.font_family
+	if len(face) == 0 {
+		// Each plugin's own sensible default rather than one shared name
+		// that only exists on one platform.
+		face = strings.has_prefix(kind, "text_gdiplus") ? "Arial" : "Sans Serif"
+	}
+	style := look.bold ? "Bold" : "Regular"
+	colour := obsws_abgr(look.color)
+
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, "{")
+	if with_text do strings.write_string(&b, `"text":"",`)
 
 	if strings.has_prefix(kind, "text_gdiplus") {
-		return fmt.tprintf(
-			`{{"text":"","color":%d,"outline":true,"outline_color":4278190080,` +
-			`"outline_size":2,"font":{{"face":"Arial","size":36,"style":"Bold","flags":0}}}}`,
-			COLOUR,
-		)
+		fmt.sbprintf(&b, `"color":%d,"outline":%s,`, colour, look.outline ? "true" : "false")
+		// Black outline at 2px. Not exposed: an outline colour and width
+		// is two more controls for something that only ever wants to be a
+		// dark edge that keeps text off the gameplay behind it.
+		strings.write_string(&b, `"outline_color":4278190080,"outline_size":2,`)
+	} else {
+		// color1/color2 are the ends of a gradient; the same value in both
+		// is a flat fill.
+		fmt.sbprintf(&b, `"color1":%d,"color2":%d,"outline":%s,`,
+			colour, colour, look.outline ? "true" : "false")
 	}
 
-	// text_ft2_source_v2 (Linux, and Windows installs without GDI+).
-	return fmt.tprintf(
-		`{{"text":"","color1":%d,"color2":%d,"outline":true,` +
-		`"font":{{"face":"Sans Serif","size":36,"style":"Bold","flags":0}}}}`,
-		COLOUR, COLOUR,
-	)
+	strings.write_string(&b, `"font":{"face":"`)
+	json_escape_string(&b, face)
+	// Four braces, not two: sbprintf treats {{ and }} as escapes, so `}}`
+	// emits a single `}` — one short of the two needed to close the font
+	// object and the settings object. The short version produced malformed
+	// JSON, which OBS drops on the floor without a word.
+	fmt.sbprintf(&b, `","size":%d,"style":"%s","flags":0}}}}`, look.font_size, style)
+	return strings.to_string(b)
+}
+
+// "#rrggbb" to the ABGR integer with full alpha that OBS wants.
+@(private = "file")
+obsws_abgr :: proc(hex: string) -> u32 {
+	if !is_hex_colour(hex) do return 0xFFFFFFFF
+	v, ok := strconv.parse_u64_of_base(hex[1:], 16)
+	if !ok do return 0xFFFFFFFF
+	r := u32(v >> 16) & 0xFF
+	g := u32(v >> 8) & 0xFF
+	b := u32(v) & 0xFF
+	return 0xFF000000 | (b << 16) | (g << 8) | r
+}
+
+// Push the styling to every source we own.
+//
+// Only called when the user changes something on the panel — never on a
+// data update. That keeps the promise that the app only touches their
+// text as they play, while still letting the panel be the place styling
+// is set. Restyle a source in OBS and it stays that way until you change
+// a control here.
+obsws_push_style :: proc() {
+	sync.mutex_lock(&g_obs.send_mu)
+	defer sync.mutex_unlock(&g_obs.send_mu)
+
+	sync.mutex_lock(&g_obs.mu)
+	conn := g_obs.conn
+	connected := g_obs.state == .Connected
+	kind := strings.clone(g_obs.text_kind, context.temp_allocator)
+	sync.mutex_unlock(&g_obs.mu)
+
+	if !connected || conn == nil || len(kind) == 0 do return
+
+	for k in Widget_Kind {
+		if !obsws_sends(k) do continue
+		b := strings.builder_make(context.temp_allocator)
+		strings.write_string(&b, `{"inputName":"`)
+		json_escape_string(&b, obs_source_name(k))
+		strings.write_string(&b, `","inputSettings":`)
+		strings.write_string(&b, obsws_style_settings(kind, with_text = false))
+		strings.write_string(&b, `,"overlay":true}`)
+		obsws_request(conn, "SetInputSettings", strings.to_string(b))
+	}
 }
 
 // Names of every input OBS currently knows about.

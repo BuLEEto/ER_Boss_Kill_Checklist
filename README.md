@@ -31,8 +31,8 @@ beaten — safe to use with EAC.
     layout. Styled here, updates live
   - **Text files** — plain text files for OBS "Text (GDI+/FreeType)" sources
     set to *Read from file*. Works on any OBS version, no browser source
-  - **OBS text sources** — creates and updates real text sources in OBS over
-    obs-websocket, for the Linux builds packaged without CEF
+  - **obs-websocket** — creates and updates real OBS text sources, styling and
+    all, for the Linux builds packaged without CEF
 
 - Mobile companion page for single-monitor players
 
@@ -112,7 +112,7 @@ The **OBS** tab has one panel per thing you'd actually add to a scene:
 | **Overlay card** | Everything in one box. One Browser source, one URL. What most people want, and the cheapest — a single browser instance. |
 | **Single values** | A page per value, each its own Browser source, for layouts where the numbers live in different corners. Styled together or one at a time. |
 | **Text files** | Plain files that OBS text sources read. Works on any OBS version, costs nothing, and other tools can read them too. |
-| **OBS text sources** | Connects over obs-websocket and creates real OBS text sources, keeping their text current. For OBS builds that have no Browser source. |
+| **obs-websocket** | Connects to OBS and creates real OBS text sources, keeping their text and styling current. For OBS builds that have no Browser source. |
 
 ### If your OBS has no Browser source
 
@@ -124,8 +124,13 @@ nothing.
 
 Options, in order of least effort:
 
-1. **OBS text sources** — the last panel. Nothing to install; it drives the text
-   sources your OBS does have.
+1. **obs-websocket** — the last panel. Nothing to install; it creates and drives
+   the text sources your OBS does have, styling included: font, size, colour,
+   bold and outline, set once here and pushed to all of them.
+
+   No alignment, though — `text_ft2_source_v2` hasn't got any, and neither has
+   line height. Those two gaps are exactly what the browser-source pages exist
+   to fill.
 2. **Text files** — same idea, but you add the sources yourself and point them
    at files.
 3. **The Flatpak or Snap build of OBS**, which bundles CEF and has Browser
