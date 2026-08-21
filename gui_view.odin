@@ -40,6 +40,7 @@ gui_view :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		view_status_bar(s, ctx),
 		// Both return an empty spacer when closed, so they cost nothing here.
 		view_save_dialog(s, ctx),
+		view_widget_style_dialog(s, ctx),
 		view_help_dialog(s, ctx),
 		skald.toast(
 			ctx,
@@ -128,9 +129,7 @@ ID_OVERLAY_MODE   :: "obs.overlay_mode"
 ID_OVERLAY_COUNT  :: "obs.overlay_count"
 ID_OVERLAY_REGION :: "obs.overlay_region"
 ID_ROOMY_LINES    :: "obs.roomy_lines"
-ID_WS_ROOMY       :: "obs.ws_roomy"
 ID_OVERLAY_ALIGN  :: "obs.overlay_align"
-ID_SOURCE_STYLE   :: "obs.source_style"
 ID_OBS_TAB        :: "obs.subtab"
 ID_THEME_ACCENT   :: "obs.theme_accent"
 ID_THEME_TEXT     :: "obs.theme_text"
@@ -144,15 +143,8 @@ ID_SHOW_ATTEMPTS  :: "obs.show_attempts"
 ID_SHOW_SESSION   :: "obs.show_session"
 ID_KILL_BANNER    :: "obs.kill_banner"
 ID_BANNER_SECS    :: "obs.banner_secs"
-ID_WS_SCENE       :: "obs.ws_scene"
-ID_WIDGET_URLS    :: "obs.widget_urls"
 ID_TEXT_TOGGLE    :: "obs.text_enabled"
 ID_TEXT_DIR       :: "obs.text_dir"
-ID_WS_TOGGLE      :: "obs.ws_enabled"
-ID_WS_HOST        :: "obs.ws_host"
-ID_WS_PORT        :: "obs.ws_port"
-ID_WS_PASS        :: "obs.ws_pass"
-ID_WS_REMEMBER    :: "obs.ws_remember"
 ID_HIDE_COMPLETED :: "checklist.hide_completed"
 ID_RESET_ATTEMPTS :: "checklist.reset_attempts"
 ID_RESET_SESSION  :: "checklist.reset_session"
@@ -607,9 +599,9 @@ view_obs :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	labels := OBS_TAB_LABELS
 	panel: skald.View
 	switch s.obs_tab {
-	case .Browser:   panel = view_obs_browser(s, ctx)
+	case .Overlay:   panel = view_obs_browser(s, ctx)
+	case .Widgets:   panel = view_obs_widgets(s, ctx)
 	case .Text:      panel = view_obs_text(s, ctx)
-	case .Setup:     panel = view_obs_setup(s, ctx)
 	}
 
 	// A segmented control rather than another tab strip: nesting tabs
@@ -752,8 +744,8 @@ view_obs_browser :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		th.color.fg_muted, th.font.size_xs,
 	))
 
-	looks := view_appearance(s, ctx, .Browser, "browser",
-		"How the overlay card looks. The single-value pages below have their own.")
+	looks := view_appearance(s, ctx, .Overlay, "browser",
+		"How the card looks. The single-value pages have their own, on the next tab.")
 	for v in looks do append(&rows, v)
 
 	append(&rows, skald.spacer(th.spacing.sm))
@@ -764,39 +756,90 @@ view_obs_browser :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	append(&rows, view_copy_row(ctx, "Overlay URL", overlay_url_string(context.temp_allocator)))
 	append(&rows, view_copy_row(ctx, "Mobile view", mobile_url_string(context.temp_allocator)))
 
-	// ---- One value per source -------------------------------------------
-	//
-	// The same pages obs-websocket creates when it makes browser sources.
-	// They were previously reachable only by letting the app create them,
-	// which made a whole capability look like it belonged to a protocol it
-	// has nothing to do with. They're just URLs; here they are.
-	append(&rows, skald.spacer(th.spacing.md))
-	append(&rows, skald.section_header(ctx, "One value per source"))
+	return skald.scroll(ctx, {0, 0}, skald.col(
+		..rows[:],
+		spacing     = th.spacing.sm,
+		padding     = SCROLL_GUTTER,
+		cross_align = .Stretch,
+	))
+}
+
+// ---------------------------------------------------------------------------
+// Single values
+//
+// One page per value, each its own browser source, so they can be put in
+// different corners of a layout rather than stacked in one card.
+//
+// Every row carries its own Style… button. The controls behind it are the
+// same set as the shared ones, and eight copies of that inline would be an
+// unreadable page — hence a dialog, opened for one page at a time.
+// ---------------------------------------------------------------------------
+
+view_obs_widgets :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
+	th := ctx.theme
+	rows := make([dynamic]skald.View, context.temp_allocator)
+
+	append(&rows, help_row(ctx,
+		"A page per value, each added to OBS as its own Browser source, so you position and size them separately. Copy the ones you want.",
+		.Single_Values,
+	))
+
+	if !server_is_running(&app.server) {
+		append(&rows, skald.alert(ctx,
+			"The web server is off, so these pages won't load. Turn it on under Overlay card.",
+			tone = .Warning,
+		))
+	}
+
+	append(&rows, skald.section_header(ctx, "Pages"))
+	for kind in Widget_Kind {
+		custom := settings_widget_look(kind).custom
+
+		append(&rows, skald.col(
+			skald.row(
+				skald.col(
+					skald.text(widget_label(kind), th.color.fg, th.font.size_sm),
+					skald.text(widget_example(kind), th.color.fg_muted, th.font.size_xs),
+					spacing = 0,
+				),
+				skald.flex(1, skald.spacer(0)),
+				skald.text(
+					custom ? "Styled on its own" : "Shared style",
+					custom ? th.color.primary : th.color.fg_muted,
+					th.font.size_xs,
+				),
+				skald.button(ctx, "Style…", Msg(Widget_Style_Opened(kind)),
+					id = skald.hash_id(fmt.tprintf("widget.style.%s", widget_slug(kind)))),
+				spacing     = th.spacing.sm,
+				cross_align = .Center,
+			),
+			skald.row(
+				skald.flex(1, skald.text_selectable(
+					ctx, widget_url_string(kind, context.temp_allocator),
+					th.color.fg_muted, th.font.size_xs,
+				), min_main = 200),
+				skald.button(ctx, "Copy",
+					Msg(Copy_Requested(widget_url_string(kind, context.temp_allocator)))),
+				spacing     = th.spacing.sm,
+				cross_align = .Center,
+			),
+			spacing     = th.spacing.xs,
+			cross_align = .Stretch,
+		))
+	}
+
 	append(&rows, paragraph(ctx,
-		"For a layout where the numbers live in different corners rather than in one card. Each is its own Browser source, so you position and size them separately in OBS. Add only the ones you want — each costs a browser instance.",
+		"Each is a browser instance in OBS, so add only the ones you'll use. The URLs never change — everything about how a page looks is resolved here, so restyling one updates it live without re-pasting anything.",
 		th.color.fg_muted, th.font.size_xs,
 	))
 
-	url_rows := make([dynamic]skald.View, context.temp_allocator)
-	for kind in Obs_Source {
-		// The overlay is the card above, not a single value.
-		if kind == .Overlay do continue
-		append(&url_rows, view_copy_row(
-			ctx, obs_source_short_label(kind),
-			widget_url_string(kind, context.temp_allocator),
-		))
-	}
-	append(&rows, skald.collapsible(
-		ctx, fmt.tprintf("Show the %d URLs", len(url_rows)), s.widget_urls_open,
-		on_widget_urls_toggled,
-		skald.col(..url_rows[:], spacing = th.spacing.xs, cross_align = .Stretch),
-		id = skald.hash_id(ID_WIDGET_URLS),
-	))
+	append(&rows, skald.spacer(th.spacing.sm))
+	for v in view_region_control(ctx, .Widget, "widget.region") do append(&rows, v)
 
-	for v in view_region_control(ctx, .Widget, "browser.widget.region") do append(&rows, v)
-	widget_looks := view_appearance(s, ctx, .Widget, "browser.widget",
-		"How the single-value pages look. Shared with anything the Set up OBS panel creates as a browser source — they're the same pages.")
-	for v in widget_looks do append(&rows, v)
+	append(&rows, skald.spacer(th.spacing.sm))
+	shared := view_appearance(s, ctx, .Widgets, "widget",
+		"The shared look, used by every page above that hasn't been styled on its own.")
+	for v in shared do append(&rows, v)
 
 	return skald.scroll(ctx, {0, 0}, skald.col(
 		..rows[:],
@@ -839,7 +882,7 @@ view_obs_text :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 
 	append(&rows, skald.checkbox(
 		ctx, app.settings.text_roomy_lines, "Blank line between entries in the multi-line files",
-		false, on_roomy_lines, id = skald.hash_id(ID_ROOMY_LINES),
+		on_roomy_lines, id = skald.hash_id(ID_ROOMY_LINES),
 	))
 	append(&rows, paragraph(ctx,
 		"OBS text sources have no line-height setting, so the only way to loosen a list up is to send the extra line.",
@@ -868,146 +911,84 @@ view_obs_text :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	))
 }
 
-// ---------------------------------------------------------------------------
-// obs-websocket
-// ---------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// One page's styling
+//
+// The same controls as the shared Appearance, for a single page, in a
+// dialog. Inline would mean eight copies of a nine-row form on one panel,
+// which is the sort of page nobody reads.
+//
+// A page either follows the shared look or has one entirely of its own —
+// there's no per-field inheritance. Mixing the two means every control
+// needs a third "not set" state, and "why didn't that one change?" is a
+// worse question than "this page is styled on its own".
+// ----------------------------------------------------------------------------
 
-view_obs_setup :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
+view_widget_style_dialog :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	th := ctx.theme
-	rows := make([dynamic]skald.View, context.temp_allocator)
 
-	append(&rows, help_row(ctx,
-		"Optional. This creates and positions the sources in OBS for you instead of you adding each one by hand. It doesn't show anything the Browser source panel can't — it just saves the clicking. Needs OBS's WebSocket server on, under Tools → WebSocket Server Settings.",
-		.Obs_Websocket,
-	))
-	append(&rows, skald.toggle(ctx, app.settings.obsws_enabled, "Let the app set up OBS", on_obsws_set,
-		id = skald.hash_id(ID_WS_TOGGLE)))
-	append(&rows, skald.row(
-		skald.text("Host", th.color.fg_muted, th.font.size_sm),
-		skald.text_input(ctx, s.obsws_host_draft, on_obsws_host, width = 160,
-			id = skald.hash_id(ID_WS_HOST)),
-		skald.text("Port", th.color.fg_muted, th.font.size_sm),
-		skald.text_input(ctx, s.obsws_port_draft, on_obsws_port, width = 90,
-			id = skald.hash_id(ID_WS_PORT)),
-		spacing     = th.spacing.sm,
-		cross_align = .Center,
-	))
-	append(&rows, skald.row(
-		skald.text("Password", th.color.fg_muted, th.font.size_sm),
-		skald.text_input(ctx, s.obsws_pass_draft, on_obsws_pass, width = 220, password = true,
-			id = skald.hash_id(ID_WS_PASS)),
-		skald.button(ctx, "Connect", Msg(Obsws_Connect_Requested{})),
-		spacing     = th.spacing.sm,
-		cross_align = .Center,
-	))
-	append(&rows, skald.checkbox(
-		ctx, app.settings.obsws_remember_password,
-		"Remember the password (encrypted, tied to this machine)",
-		on_obsws_remember, id = skald.hash_id(ID_WS_REMEMBER),
-	))
-
-	status, state := obsws_status_text()
-	status_colour := th.color.fg_muted
-	switch state {
-	case .Connected: status_colour = th.color.success
-	case .Failed:    status_colour = th.color.danger
-	case .Connecting, .Disconnected: // muted
+	kind, open := s.widget_style_open.?
+	if !open {
+		// Still has to be built: dialog animates its own dismissal, and a
+		// view that vanishes outright takes the animation with it.
+		return skald.dialog(
+			ctx, open = false, on_dismiss = on_widget_style_closed,
+			content = skald.spacer(0),
+		)
 	}
-	append(&rows, skald.text(status, status_colour, th.font.size_sm))
 
-	// Scene picker. Populated from OBS, so it only has real names once
-	// we've connected at least once.
-	scenes := obsws_scene_names()
-	chosen := app.settings.obsws_scene
-	scene_value := len(chosen) > 0 ? chosen : OBSWS_SCENE_NONE_LABEL
+	custom := settings_widget_look(kind).custom
 
-	append(&rows, skald.spacer(th.spacing.sm))
-	append(&rows, skald.form_row(ctx, "Add to scene",
-		skald.select(
-			ctx, scene_value, scenes, on_obsws_scene,
-			width = 280, placeholder = OBSWS_SCENE_NONE_LABEL,
-			id = skald.hash_id(ID_WS_SCENE),
-		),
-		label_width = 120,
+	body := make([dynamic]skald.View, context.temp_allocator)
+	append(&body, skald.checkbox(
+		ctx, custom, "Style this page on its own",
+		kind, on_widget_custom_set,
+		id = skald.hash_id("widget.style.custom"),
+	))
+	append(&body, paragraph(ctx,
+		custom \
+			? "This page ignores the shared look. Untick to put it back on the shared one — what you set here is kept, so re-ticking brings it back." \
+			: "This page follows the shared look set on the Single values panel. Tick to give it a look of its own, starting from a copy of the shared one.",
+		th.color.fg_muted, th.font.size_xs,
 	))
 
-	// Nothing is created until a scene is picked, so say so where the
-	// choice is rather than leaving someone waiting for sources that are
-	// never coming.
-	switch {
-	case len(scenes) == 0:
-		append(&rows, paragraph(ctx,
-			"Connect and your scenes will be listed here. No sources are created until you pick one.",
-			th.color.fg_muted, th.font.size_xs,
-		))
-	case len(chosen) == 0:
-		append(&rows, paragraph(ctx,
-			"Pick the scene the sources should go in. Nothing is created until you do — otherwise they'd land in whichever scene happened to be live when the app connected, which is a nasty surprise if that was your Starting Soon scene.",
-			th.color.warning, th.font.size_xs,
-		))
-	case:
-		append(&rows, paragraph(ctx,
-			fmt.tprintf(
-				"New sources are created in %s. Change it and the app reconnects and adds them to the new scene; the copies in the old one are left alone, so delete those in OBS if you don't want them.",
-				chosen,
+	if custom {
+		append(&body, skald.spacer(th.spacing.sm))
+		for v in view_appearance(s, ctx, look_target_for(kind), "one",
+			"Applies to this page only.") {
+			append(&body, v)
+		}
+	}
+
+	return skald.dialog(
+		ctx,
+		open = true,
+		on_dismiss = on_widget_style_closed,
+		width = 640,
+		max_width = 700,
+		content = skald.col(
+			skald.text(widget_label(kind), th.color.fg, th.font.size_lg),
+			skald.text(widget_example(kind), th.color.fg_muted, th.font.size_sm),
+			skald.spacer(th.spacing.md),
+			skald.scroll(ctx, {0, 420}, skald.col(
+				..body[:], spacing = th.spacing.sm, cross_align = .Stretch,
+			)),
+			skald.spacer(th.spacing.md),
+			skald.row(
+				skald.flex(1, skald.spacer(0)),
+				skald.button(ctx, "Done", Msg(Widget_Style_Closed{}),
+					bg = th.color.primary, fg = th.color.on_primary),
+				cross_align = .Center,
 			),
-			th.color.fg_muted, th.font.size_xs,
-		))
-	}
-
-	append(&rows, skald.spacer(th.spacing.sm))
-	append(&rows, skald.section_header(ctx, "What to create"))
-	append(&rows, skald.form_row(ctx, "As",
-		skald.segmented(
-			ctx, {"Browser sources", "Text sources"},
-			app.settings.obsws_source_style == "web" ? 0 : 1, on_obs_source_style,
-			id = skald.hash_id(ID_SOURCE_STYLE),
+			spacing     = 0,
+			cross_align = .Stretch,
 		),
-		label_width = 120,
-	))
-	append(&rows, paragraph(ctx,
-		app.settings.obsws_source_style == "web" \
-			? "Creates the same single-value pages the Browser source panel hands out URLs for — so they're styled by the same Appearance settings, and alignment and line height work. Costs a browser instance per source." \
-			: "Creates OBS text sources instead. Much lighter — no browser instance — but OBS gives text sources no alignment and no line height, and they're styled in OBS rather than here.",
-		th.color.fg_muted, th.font.size_xs,
-	))
+	)
+}
 
-	append(&rows, skald.spacer(th.spacing.xs))
-	for kind in Obs_Source {
-		append(&rows, skald.checkbox(
-			ctx, obs_source_enabled(kind), obs_source_label(kind),
-			kind, on_obs_source_toggled,
-			id = skald.hash_id(obs_source_name(kind)),
-		))
-	}
-	append(&rows, paragraph(ctx,
-		"Only the ticked ones are created. Unticking hides the source in OBS rather than deleting it, so anything you've styled survives — re-tick to bring it back.",
-		th.color.fg_muted, th.font.size_xs,
-	))
-
-	append(&rows, skald.spacer(th.spacing.sm))
-	for v in view_region_control(ctx, .Widget, "ws.region") do append(&rows, v)
-	append(&rows, skald.checkbox(
-		ctx, app.settings.ws_roomy_lines, "Blank line between entries in the multi-line sources",
-		true, on_roomy_lines, id = skald.hash_id(ID_WS_ROOMY),
-	))
-
-	if app.settings.obsws_source_style == "web" {
-		// The same controls as the Browser source panel, deliberately
-		// repeated rather than cross-referenced: they're one setting, and
-		// being told to go and look at another tab to restyle what you're
-		// looking at is exactly the shuffle this tab used to demand.
-		looks := view_appearance(s, ctx, .Widget, "ws",
-			"How the single-value pages look. The same setting as on the Browser source panel — these are the same pages.")
-		for v in looks do append(&rows, v)
-	}
-
-	return skald.scroll(ctx, {0, 0}, skald.col(
-		..rows[:],
-		spacing     = th.spacing.sm,
-		padding     = SCROLL_GUTTER,
-		cross_align = .Stretch,
-	))
+on_widget_style_closed :: proc() -> Msg { return Widget_Style_Closed{} }
+on_widget_custom_set :: proc(kind: Widget_Kind, on: bool) -> Msg {
+	return Widget_Style_Custom_Set{kind = kind, custom = on}
 }
 
 view_copy_row :: proc(ctx: ^skald.Ctx(Msg), label, value: string) -> skald.View {
@@ -1105,10 +1086,17 @@ view_status_bar :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 // a browser source it points it at exactly the URL the Copy button hands
 // out, so a source you made yourself and one the app made are the same
 // thing. Two builders would have drifted the first time either changed.
-widget_url_string :: proc(kind: Obs_Source, allocator := context.allocator) -> string {
+// Deliberately carries nothing but the page's type.
+//
+// Alignment used to be a query parameter, which meant the URL changed
+// whenever the setting did and a source you'd already pasted kept the old
+// value until you re-pasted it. Everything about how a page looks is now
+// resolved server-side from settings, so this string never changes and a
+// restyle reaches OBS on the next live update instead.
+widget_url_string :: proc(kind: Widget_Kind, allocator := context.allocator) -> string {
 	return fmt.aprintf(
-		"http://localhost:%d/widget?type=%s&align=%s",
-		app.server.port, obs_source_widget(kind), app.settings.ws_look.align,
+		"http://localhost:%d/widget?type=%s",
+		app.server.port, widget_slug(kind),
 		allocator = allocator,
 	)
 }
@@ -1228,8 +1216,6 @@ on_show_attempts :: proc(v: bool) -> Msg { return Show_Attempts_Set(v) }
 on_show_session :: proc(v: bool) -> Msg { return Show_Session_Set(v) }
 on_kill_banner :: proc(v: bool) -> Msg { return Kill_Banner_Set(v) }
 on_kill_banner_secs :: proc(v: f32) -> Msg { return Kill_Banner_Secs(int(v + 0.5)) }
-on_obsws_scene :: proc(label: string) -> Msg { return Obsws_Scene_Selected(label) }
-on_widget_urls_toggled :: proc(open: bool) -> Msg { return Widget_Urls_Toggled(open) }
 on_hide_completed :: proc(v: bool) -> Msg { return Hide_Completed_Set(v) }
 
 on_theme_selected :: proc(label: string) -> Msg {
@@ -1261,23 +1247,8 @@ on_overlay_bg :: proc(i: int) -> Msg {
 
 on_overlay_count :: proc(v: f32) -> Msg { return Overlay_Count_Changed(int(v + 0.5)) }
 
-on_obs_source_style :: proc(i: int) -> Msg {
-	return Obs_Source_Style_Selected(i == 0 ? "web" : "text")
-}
-
-on_obs_source_toggled :: proc(kind: Obs_Source, on: bool) -> Msg {
-	return Obs_Source_Toggled{kind = kind, on = on}
-}
-
-on_roomy_lines :: proc(websocket: bool, v: bool) -> Msg {
-	return Roomy_Lines_Set{websocket = websocket, on = v}
-}
+on_roomy_lines :: proc(v: bool) -> Msg { return Roomy_Lines_Set(v) }
 
 on_obs_text_set :: proc(v: bool) -> Msg { return Obs_Text_Set(v) }
 on_obs_text_dir :: proc(v: string) -> Msg { return Obs_Text_Dir_Draft(v) }
 
-on_obsws_set :: proc(v: bool) -> Msg { return Obsws_Set(v) }
-on_obsws_host :: proc(v: string) -> Msg { return Obsws_Host_Draft(v) }
-on_obsws_port :: proc(v: string) -> Msg { return Obsws_Port_Draft(v) }
-on_obsws_pass :: proc(v: string) -> Msg { return Obsws_Pass_Draft(v) }
-on_obsws_remember :: proc(v: bool) -> Msg { return Obsws_Remember_Set(v) }

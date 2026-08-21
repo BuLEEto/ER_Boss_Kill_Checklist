@@ -13,12 +13,54 @@ import "gui:skald"
 // them. Nothing here reads a setting belonging to a different panel.
 // ============================================================================
 
-// The pages this app serves that can be styled. Named for the page, not
-// for how it reached OBS — the widget pages are the same pages whether
-// the user pasted their URL by hand or let the app create the sources.
+// Everything that can be styled independently: the overlay card, the
+// shared look the single-value pages fall back to, and one entry per page
+// for when a page is styled on its own.
+//
+// A flat enum rather than a {scope, kind} struct so it can still index the
+// draft arrays the custom-CSS box needs — Odin's enumerated arrays want an
+// enum key, and the alternative was a parallel lookup for no real gain.
 Look_Target :: enum {
-	Browser, // the overlay card
-	Widget,  // the individual single-value pages
+	Overlay,
+	Widgets, // the shared look
+
+	W_Progress,
+	W_Next_Boss,
+	W_Deaths,
+	W_Attempts,
+	W_Session,
+	W_Character,
+	W_Region,
+	W_Region_Bosses,
+}
+
+// The per-page entry for a widget, and back again.
+look_target_for :: proc(k: Widget_Kind) -> Look_Target {
+	switch k {
+	case .Progress:      return .W_Progress
+	case .Next_Boss:     return .W_Next_Boss
+	case .Deaths:        return .W_Deaths
+	case .Attempts:      return .W_Attempts
+	case .Session:       return .W_Session
+	case .Character:     return .W_Character
+	case .Region:        return .W_Region
+	case .Region_Bosses: return .W_Region_Bosses
+	}
+	return .Widgets
+}
+
+look_target_widget :: proc(t: Look_Target) -> (Widget_Kind, bool) {
+	#partial switch t {
+	case .W_Progress:      return .Progress, true
+	case .W_Next_Boss:     return .Next_Boss, true
+	case .W_Deaths:        return .Deaths, true
+	case .W_Attempts:      return .Attempts, true
+	case .W_Session:       return .Session, true
+	case .W_Character:     return .Character, true
+	case .W_Region:        return .Region, true
+	case .W_Region_Bosses: return .Region_Bosses, true
+	}
+	return .Progress, false
 }
 
 // What can be pointed at a region. Text files have no appearance but do
@@ -29,12 +71,13 @@ Region_Target :: enum {
 	Widget,
 }
 
+
 settings_look :: proc(t: Look_Target) -> ^Appearance {
-	switch t {
-	case .Browser:   return &app.settings.browser_look
-	case .Widget:  return &app.settings.ws_look
+	if t == .Overlay do return &app.settings.browser_look
+	if k, ok := look_target_widget(t); ok {
+		return &settings_widget_look(k).look
 	}
-	return &app.settings.browser_look
+	return &app.settings.ws_look
 }
 
 settings_region :: proc(t: Region_Target) -> ^Region_Choice {

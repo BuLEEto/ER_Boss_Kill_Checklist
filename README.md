@@ -30,9 +30,7 @@ beaten — safe to use with EAC.
     layout. Styled here, updates live
   - **Text files** — plain text files for OBS "Text (GDI+/FreeType)" sources
     set to *Read from file*. Works on any OBS version, no browser source
-- Optionally, **let the app set OBS up for you** over obs-websocket: it creates
-  and positions the sources in the scene you choose, so you don't add eight by
-  hand
+
 - Mobile companion page for single-monitor players
 
 ## Building
@@ -104,19 +102,20 @@ The **About** tab shows the exact path.
 
 ## OBS
 
-The **OBS** tab has three panels, but only two of them are ways of getting your
-progress on screen:
+The **OBS** tab has one panel per thing you'd actually add to a scene:
 
 | Panel | What it is |
 |---|---|
-| **Browser source** | Paste a URL into an OBS Browser source. The standard way overlays work, the best looking, and the only one where alignment, line height and the kill banner are possible. Start here. |
+| **Overlay card** | Everything in one box. One Browser source, one URL. What most people want, and the cheapest — a single browser instance. |
+| **Single values** | A page per value, each its own Browser source, for layouts where the numbers live in different corners. Styled together or one at a time. |
 | **Text files** | Plain files that OBS text sources read. Works on any OBS version, costs nothing, and other tools can read them too. |
-| **Set up OBS for me** | Not a third way — it shows nothing the first panel can't. It connects over obs-websocket and *creates* the sources for you, in a scene you pick, so you don't add eight by hand. Optional. |
 
-That last one used to be presented as a peer of the other two, which made the
-tab read as three competing ways to do the same job. It isn't: in its default
-mode it creates browser sources pointed at the very same pages the **Browser
-source** panel hands out URLs for.
+Earlier versions also drove OBS over **obs-websocket**, creating the sources for
+you. That's gone. It never showed anything the browser sources couldn't — in its
+last form it was literally creating browser sources pointed at these same pages
+— and presenting it alongside them made the tab read as competing ways to do one
+job. Copying a URL into a Browser source is the thing every OBS user already
+knows how to do, so that's all there is now.
 
 Each panel has a **? How do I use this** button with step-by-step OBS
 instructions: which source type to add, where the setting lives, what each
@@ -128,23 +127,41 @@ Plateau at 64px and the text files follow the first unfinished area. That's
 usually what you want when more than one is on screen, since you'd rarely show
 the same thing twice.
 
-### Browser source (best looking)
+### Overlay card
 
 Leave *Run the web server* on, pick your overlay mode (summary / next up /
 region) and background, then copy the URL into an OBS **Browser Source**. The
 page updates live over server-sent events — no refresh interval to tune.
 
-This panel serves two shapes, each with its own Region and Appearance:
+Everything in one box, one source. What most people want, and the cheapest —
+a single browser instance.
 
-- **The overlay card** — everything in one box. One source, one URL. This is
-  what most people want, and it's the cheapest: one browser instance.
-- **One value per source** — a page per value (progress, attempts, next boss,
-  and the rest) under *One value per source*, each with a Copy button. For a
-  layout where the numbers live in different corners. Add only what you need;
-  each is its own browser instance.
+### Single values
 
-**Region** decides which area this integration shows. Each of the three has its
-own, set on its own panel:
+A page per value — progress, attempts, next boss, deaths, session, character,
+region, region bosses — each with a Copy button, each added to OBS as its own
+Browser source. For layouts where the numbers live in different corners rather
+than gathered in a card. Add only the ones you'll use; each is a browser
+instance.
+
+The URLs carry nothing but the page's type. Everything about how a page looks
+is resolved by the app, so restyling reaches a source that's already in OBS on
+its own — you never re-paste a URL you've already set up.
+
+**Styling one on its own.** *Appearance* at the bottom of the panel styles every
+page at once. To make one different, press **Style…** on its row and tick *Style
+this page on its own*: it starts as a copy of the shared look and then goes its
+own way. Untick to put it back on the shared one — what you set is kept, so you
+can flip between the two.
+
+It's whole-look, not per-setting. A page either follows the shared look or has
+one entirely of its own. Per-setting inheritance would need every control to
+carry a third "not set" state, and *why didn't that one change?* is a worse
+question to be stuck with than *this page is styled on its own*.
+
+### Regions and appearance
+
+**Region** decides which area a panel shows. Each panel has its own:
 
 | | |
 |---|---|
@@ -157,6 +174,22 @@ The automatic modes deliberately leave it off — the server then resolves the a
 on every request, so the page keeps following instead of freezing on whichever
 area was current when you copied the URL. The pin is stored by name, so
 switching boss lists can't silently repoint it at a different area.
+
+**Appearance** styles the pages this app serves — accent colour, text colour,
+size, font family, outline, alignment, plus an **Advanced — custom CSS** box for
+anything else. The overlay card has its own; the single-value pages share one,
+which any of them can override.
+
+**Font** lists the families installed on this PC (via fontconfig on Linux, GDI
+on Windows), filtered as you type. It's also free-form: OBS renders the page, so
+if OBS runs on a different machine, type the font name as it's spelled *there*.
+The first entry clears the setting and leaves the page on its own font stack.
+
+Styling lives here rather than being left to OBS for a specific reason: OBS's
+Custom CSS box belongs to a *single source*. With nine possible sources, theming
+through OBS means pasting the same rules nine times, and again on every tweak.
+OBS's box still works and still wins — it's injected after ours — which makes it
+the right place for a one-off override on one source.
 
 **Align** switches the whole overlay between left and right. Worth knowing why
 it lives here and not on the text sources: OBS's own text sources have no text
@@ -228,100 +261,6 @@ works on every OBS version:
 | `region_bosses.txt` | what's left in that region, one per line |
 | `regions.txt` | every region and its count, one per line |
 
-### obs-websocket
-
-Enable OBS's own WebSocket server (**Tools → WebSocket Server Settings**), then
-enter the host, port and password on the OBS tab and hit **Connect**.
-
-**Add to scene** decides where the sources are created, and picking one is
-required: until you do, the app connects and creates nothing. Defaulting to
-whichever scene happened to be live would put eight sources in your *Starting
-Soon* scene, and you'd find out on stream. Your scenes are listed once you've
-connected.
-
-Changing it reconnects and adds the sources to the new scene; the copies in the
-old scene are left alone, so delete those in OBS if you don't want them. A scene
-you've since renamed or deleted is treated as "not chosen" — nothing is created,
-and sources that already exist keep updating, because the app addresses those by
-name and doesn't care which scene they're in.
-
-The app creates a text source per ticked entry — `ER Progress`, `ER Next Boss`,
-`ER Deaths`, `ER Attempts`, `ER Session`, `ER Character`, `ER Region` and
-`ER Region Bosses` — with a bold white font and a dark outline, stacked down the
-left so they don't land on top of each other. `ER Region` and `ER Region Bosses`
-give you the same per-area breakdown as the overlay's Region mode.
-
-Restyle and position them in OBS however you like: the app only ever changes
-their text, and a source that already exists is never created, moved or
-restyled.
-
-**Source style** decides what the individual sources are made of:
-
-| | |
-|---|---|
-| **Text** | OBS text sources. Cheap — no browser instance — but OBS gives them no text alignment and no line height, so a multi-line list is stuck ragged-left. |
-| **Web** | Each value becomes its own small browser source pointed at `/widget`. Real CSS: alignment and line height work, and each source has its own Custom CSS box. Costs a browser instance per source. |
-
-Either way they're separate sources, so you position each one independently.
-
-**ER Overlay** is the odd one out in both styles: a browser source showing the
-whole overlay card in one box. Off by default, since it overlaps the individual
-sources.
-
-**Send to OBS** on the same tab picks which of them you want.
-
-#### Appearance
-
-**Appearance** styles the pages this app serves — accent colour, text colour,
-size, font family, outline, alignment, plus an **Advanced — custom CSS** box
-for anything else. There are two, one per panel: the overlay card has its own
-on **Browser source**, and the individual widgets have theirs on
-**obs-websocket** (visible when Source style is Web), so the two can look
-different.
-
-**Font** lists the families installed on this PC (via fontconfig on Linux, GDI
-on Windows), filtered as you type. It's also free-form: OBS is what renders the
-page, so if OBS runs on a different machine, type the font name as it's spelled
-*there* — this list is a convenience, not a restriction. The first entry clears
-the setting and leaves the page on its own font stack.
-
-It lives in the app rather than being left to OBS for a specific reason: OBS's
-Custom CSS box belongs to a *single source*. With eight sources, theming
-through OBS means pasting the same rules eight times, and again on every tweak.
-The app serves the pages, so one change repaints all of that panel's.
-
-OBS's box still works, and still wins — it's injected after ours — which makes
-it the right place for a one-off override on one source:
-
-```css
-:root { --gold: #ff4444; --text: #ffffff; }   /* colours */
-.widget-value, .widget-line { font-size: 40px; line-height: 1.6; }
-```
-
-Alignment can be set three ways, narrowest wins:
-
-1. **Align** on the OBS tab — sets every source at once
-2. That source's **URL** — change `align=right` to `left` or `center`
-3. That source's **Custom CSS** — `body { text-align: center !important }`
-
-The `!important` is needed for the third because the app's rule is a class
-selector and outranks a bare `body`. Unticking one
-*hides* it in OBS rather than deleting it — anything you've styled or positioned
-survives, and re-ticking brings it straight back. OBS has no undo for a deleted
-source, so hiding is the safer default; delete it yourself if you want it gone.
-
-OBS text sources have no line-height setting in either flavour — it's been a
-[standing feature request](https://ideas.obsproject.com/posts/1285/text-source-line-height-option)
-for years. **Blank line between entries** is the only lever there is: it sends
-an extra newline between items in the multi-line sources and text files.
-
-The password is only written to `settings.json` if you tick *Remember the
-password*, and it's encrypted first — AES-256-GCM under a key derived from a
-per-machine identifier (`/etc/machine-id` on Linux, the registry's `MachineGuid`
-on Windows). A config file copied to another machine, synced to a cloud drive
-or pasted into a bug report is inert. It is *not* protection from something
-already running as you; that needs the OS keychain.
-
 ### Mobile companion
 
 Handy on a single monitor: open the mobile URL from the OBS tab on your phone.
@@ -329,7 +268,7 @@ Handy on a single monitor: open the mobile URL from the OBS tab on your phone.
 ### While you play
 
 Minimising the window doesn't stop any of it. The web server, the save polling,
-the text files and the obs-websocket pushes all keep running — only the drawing
+the text files and the served pages all keep running — only the drawing
 stops. The window idles at 0 fps and repaints solely when something changes, so
 leaving it open costs you effectively nothing.
 
@@ -359,16 +298,15 @@ For Seamless Co-op, the file is `ER0000.co2` under the mod's app ID instead of `
 | `settings.odin` | Config-directory settings, with migration from older builds |
 | `server.odin` | Web server for the OBS overlay and mobile page |
 | `obs_text.odin` | Text-file output for OBS text sources |
-| `obs_ws.odin` | obs-websocket v5 client |
+| `widgets.odin` | The single-value pages: which exist, and what each shows |
+| `fonts*.odin` | System font enumeration for the font picker |
 | `save_parser.odin` | Elden Ring save file parser (sequential binary format) |
 | `save_scan.odin` | Steam library / Proton prefix save discovery |
 | `theme.odin` | Elden Ring palette and the text-size scale |
-| `gui_help.odin` | In-app help sheets for the three OBS integrations |
-| `src/libs/sbcrypto/` | AES-256-GCM at-rest encryption for the saved password |
+| `gui_help.odin` | In-app help sheets for each OBS panel |
 | `boss_data.odin` | Boss list loading and filtering |
 | `platform_*.odin` | LAN IP detection, per platform |
 | `src/libs/http/` | HTTP server library |
-| `src/libs/websocket/` | Minimal RFC 6455 client, for obs-websocket |
 | `vendor/skald/` | Skald GUI framework (vendored, zlib) |
 | `bosses.json` | Boss definitions with event flag IDs |
 | `hardlock.json` | Hard-lock boss progression data |

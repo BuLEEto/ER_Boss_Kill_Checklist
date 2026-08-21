@@ -25,21 +25,19 @@ Tab :: enum {
 
 TAB_LABELS :: [?]string{"Setup", "Checklist", "OBS", "About"}
 
-// The OBS tab's panels.
+// The OBS tab's panels: one per thing you'd actually add to a scene.
 //
-// Browser and Text are the two ways data actually leaves this app. Setup
-// is not a third: it's obs-websocket, which creates and positions the
-// sources in OBS for you and then gets out of the way. Presenting it as a
-// peer of the other two was the thing that made this tab confusing — it
-// reads as a third way to get the same numbers on screen, when it's
-// really a shortcut for the first one.
+// Overlay card and Single values are both browser sources — the same
+// mechanism, but a card of everything versus a page per value, and they
+// want separate settings because they're separate sources on the canvas.
+// Text files are for OBS text sources reading from disk.
 Obs_Tab :: enum {
-	Browser,
+	Overlay,
+	Widgets,
 	Text,
-	Setup,
 }
 
-OBS_TAB_LABELS :: [?]string{"Browser source", "Text files", "Set up OBS for me"}
+OBS_TAB_LABELS :: [?]string{"Overlay card", "Single values", "Text files"}
 
 Gui :: struct {
 	// Set false until the first frame has asked for the poll loop to
@@ -64,13 +62,10 @@ Gui :: struct {
 	// keystroke, so typing "3100" doesn't try to bind port 3, then 31…
 	port_draft:         string,
 	obs_text_dir_draft: string,
-	obsws_host_draft:   string,
-	obsws_port_draft:   string,
-	obsws_pass_draft:   string,
 	custom_css_draft:   [Look_Target]string,
 
-	// Purely view state — whether the single-value URL list is expanded.
-	widget_urls_open: bool,
+	// Purely view state — which single-value page's style dialog is open.
+	widget_style_open: Maybe(Widget_Kind),
 
 	// Save-file polling
 	last_mtime: i64,
@@ -134,8 +129,11 @@ Kill_Banner_Set :: distinct bool
 Kill_Banner_Secs :: distinct int
 Attempts_Reset :: struct {}
 Session_Reset :: struct {}
-Obsws_Scene_Selected :: distinct string
-Widget_Urls_Toggled :: distinct bool
+// Which single-value page's style dialog is open. A Maybe rather than a
+// bool plus a kind: "open, for nothing in particular" isn't a state.
+Widget_Style_Opened :: distinct Widget_Kind
+Widget_Style_Closed :: struct {}
+Widget_Style_Custom_Set :: struct { kind: Widget_Kind, custom: bool }
 Hide_Completed_Set :: distinct bool
 Theme_Selected :: distinct string
 Ui_Scale_Selected :: distinct f32
@@ -149,7 +147,6 @@ Port_Committed :: struct {}
 
 Overlay_Mode_Selected :: distinct string
 Overlay_Bg_Selected :: distinct string
-Obs_Source_Style_Selected :: distinct string
 
 Region_Selected :: struct {
 	target: Region_Target,
@@ -169,31 +166,20 @@ Look_Css_Draft :: struct { target: Look_Target, text: string }
 Look_Css_Committed :: struct { target: Look_Target }
 Look_Reset :: struct { target: Look_Target }
 
-Roomy_Lines_Set :: struct { websocket: bool, on: bool }
+// Only the text files need this now — the served pages have CSS.
+Roomy_Lines_Set :: distinct bool
 
 Overlay_Count_Changed :: distinct int
 Copy_Requested :: distinct string
 
-Obs_Source_Toggled :: struct {
-	kind: Obs_Source,
-	on:   bool,
-}
+
 
 Obs_Text_Set :: distinct bool
 Obs_Text_Dir_Draft :: distinct string
 Obs_Text_Dir_Committed :: struct {}
 Obs_Text_Dir_Browse :: struct {}
 
-Obsws_Set :: distinct bool
-Obsws_Host_Draft :: distinct string
-Obsws_Port_Draft :: distinct string
-Obsws_Pass_Draft :: distinct string
-Obsws_Remember_Set :: distinct bool
-Obsws_Connect_Requested :: struct {}
-Obsws_Status_Changed :: struct {
-	connected: bool,
-	message:   string, // heap; owned by update
-}
+
 
 Help_Opened :: distinct Help_Topic
 Help_Closed :: struct {}
@@ -225,8 +211,9 @@ Msg :: union {
 	Kill_Banner_Secs,
 	Attempts_Reset,
 	Session_Reset,
-	Obsws_Scene_Selected,
-	Widget_Urls_Toggled,
+	Widget_Style_Opened,
+	Widget_Style_Closed,
+	Widget_Style_Custom_Set,
 	Hide_Completed_Set,
 	Theme_Selected,
 	Ui_Scale_Selected,
@@ -238,7 +225,6 @@ Msg :: union {
 	Overlay_Mode_Selected,
 	Overlay_Bg_Selected,
 	Overlay_Count_Changed,
-	Obs_Source_Style_Selected,
 	Region_Selected,
 	Look_Accent_Set,
 	Look_Text_Set,
@@ -249,20 +235,12 @@ Msg :: union {
 	Look_Css_Draft,
 	Look_Css_Committed,
 	Look_Reset,
-	Obs_Source_Toggled,
 	Copy_Requested,
 	Obs_Text_Set,
 	Roomy_Lines_Set,
 	Obs_Text_Dir_Draft,
 	Obs_Text_Dir_Committed,
 	Obs_Text_Dir_Browse,
-	Obsws_Set,
-	Obsws_Host_Draft,
-	Obsws_Port_Draft,
-	Obsws_Pass_Draft,
-	Obsws_Remember_Set,
-	Obsws_Connect_Requested,
-	Obsws_Status_Changed,
 	Help_Opened,
 	Help_Closed,
 	Toast_Dismissed,
@@ -279,9 +257,6 @@ gui_init :: proc() -> Gui {
 	g.win = saved_window_state()
 
 	g.port_draft         = fmt.aprintf("%d", app.settings.server_port)
-	g.obsws_port_draft   = fmt.aprintf("%d", app.settings.obsws_port)
-	g.obsws_host_draft   = strings.clone(app.settings.obsws_host)
-	g.obsws_pass_draft   = strings.clone(app.settings.obsws_password)
 	g.obs_text_dir_draft = strings.clone(app.settings.obs_text_dir)
 	for t in Look_Target {
 		look := settings_look(t)^
@@ -314,12 +289,6 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 
 		// Reconnect to OBS if that's how the app was left. Doing it here
 		// rather than in main() keeps the socket work on a worker.
-		if app.settings.obsws_enabled {
-			return out, skald.cmd_batch(
-				skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker),
-				skald.cmd_delay(f32(app.settings.poll_seconds), Msg(Tick{})),
-			)
-		}
 		return out, skald.cmd_delay(f32(app.settings.poll_seconds), Msg(Tick{}))
 
 	case Tab_Selected:
@@ -463,28 +432,32 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		out = gui_after_data_change(out)
 		out = gui_toast(out, "Session counters reset", .Success)
 
-	case Widget_Urls_Toggled:
-		out.widget_urls_open = bool(v)
+	case Widget_Style_Opened:
+		out.widget_style_open = Widget_Kind(v)
 
-	case Obsws_Scene_Selected:
+	case Widget_Style_Closed:
+		out.widget_style_open = nil
+
+	case Widget_Style_Custom_Set:
 		sync.guard(&app.mu)
-		// The picker only offers real scene names now, but guard the
-		// placeholder anyway — an empty setting means "not chosen", and a
-		// scene actually called that must not be mistaken for one.
-		scene := string(v)
-		if scene == OBSWS_SCENE_NONE_LABEL do scene = ""
-		if scene == app.settings.obsws_scene do return out, {}
-
-		settings_set_string(&app.settings.obsws_scene, scene)
+		w := settings_widget_look(v.kind)
+		if v.custom && !w.custom {
+			// Seed from the shared look, so switching a page to its own
+			// style starts from what it already looked like rather than
+			// from stock defaults — the first edit should be a tweak, not
+			// a surprise.
+			shared := app.settings.ws_look
+			settings_set_string(&w.look.accent, shared.accent)
+			settings_set_string(&w.look.text_color, shared.text_color)
+			settings_set_string(&w.look.font_family, shared.font_family)
+			settings_set_string(&w.look.custom_css, shared.custom_css)
+			settings_set_string(&w.look.align, shared.align)
+			w.look.font_size = shared.font_size
+			w.look.outline = shared.outline
+		}
+		w.custom = v.custom
 		app_save_settings()
-		if !app.settings.obsws_enabled do return out, {}
-
-		// Moving sources needs request/response traffic, and once we're
-		// connected the reader thread owns the socket — two threads in
-		// ws.receive on one connection is a race. Reconnecting gets a
-		// clean run at it through the path that already does this, and
-		// picking a scene is a once-in-a-setup action.
-		return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
+		out = gui_theme_changed(out)
 
 	case Hide_Completed_Set:
 		sync.guard(&app.mu)
@@ -640,7 +613,7 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		// Per target: the overlay card and a widget source start at very
 		// different sizes, so one default_appearance() would put the card
 		// back to the widgets' 28px rather than its own.
-		defaults := v.target == .Browser \
+		defaults := v.target == .Overlay \
 			? default_browser_appearance() \
 			: default_appearance()
 		look := settings_look(v.target)
@@ -656,43 +629,6 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		delete(out.custom_css_draft[v.target])
 		out.custom_css_draft[v.target] = strings.clone("")
 		out = gui_theme_changed(out)
-
-	case Obs_Source_Style_Selected:
-		sync.guard(&app.mu)
-		settings_set_string(&app.settings.obsws_source_style, string(v))
-		app_save_settings()
-		// The sources are a different OBS input kind either way, so the
-		// existing ones can't be converted — reconnecting creates the new
-		// shape and hides whatever the old style left behind.
-		if app.settings.obsws_enabled {
-			return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
-		}
-
-	case Obs_Source_Toggled:
-		sync.guard(&app.mu)
-		switch v.kind {
-		case .Progress:      app.settings.obsws_send_progress = v.on
-		case .Next_Boss:     app.settings.obsws_send_next_boss = v.on
-		case .Deaths:        app.settings.obsws_send_deaths = v.on
-		case .Character:     app.settings.obsws_send_character = v.on
-		case .Region:        app.settings.obsws_send_region = v.on
-		case .Region_Bosses: app.settings.obsws_send_region_bosses = v.on
-		case .Attempts:      app.settings.obsws_send_attempts = v.on
-		case .Session:       app.settings.obsws_send_session = v.on
-		case .Overlay:       app.settings.obsws_send_overlay = v.on
-		}
-		app_save_settings()
-
-		// Reconnect rather than patching the one source. Creating,
-		// showing and hiding all need a round trip for the scene item id,
-		// and the socket's replies belong to the reader thread once it's
-		// running — the setup pass is the one place round trips are safe,
-		// because it runs before the reader starts. On loopback a
-		// reconnect is imperceptible, and it reconciles every source at
-		// once rather than drifting one at a time.
-		if app.settings.obsws_enabled {
-			return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
-		}
 
 	case Copy_Requested:
 		skald.clipboard_set(string(v))
@@ -712,11 +648,7 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 
 	case Roomy_Lines_Set:
 		sync.guard(&app.mu)
-		if v.websocket {
-			app.settings.ws_roomy_lines = v.on
-		} else {
-			app.settings.text_roomy_lines = v.on
-		}
+		app.settings.text_roomy_lines = bool(v)
 		app_save_settings()
 		out = gui_after_data_change(out)
 
@@ -744,60 +676,6 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 				out = gui_toast(out, fmt.tprintf("Could not write text files: %v", err), .Danger)
 			}
 		}
-
-	case Obsws_Set:
-		sync.guard(&app.mu)
-		app.settings.obsws_enabled = bool(v)
-		app_save_settings()
-		if !bool(v) {
-			obsws_disconnect()
-			return out, {}
-		}
-		// Connecting talks to a socket, so it goes to a worker — OBS
-		// being slow or absent must not freeze the window.
-		return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
-
-	case Obsws_Host_Draft:
-		delete(out.obsws_host_draft)
-		out.obsws_host_draft = strings.clone(string(v))
-
-	case Obsws_Port_Draft:
-		delete(out.obsws_port_draft)
-		out.obsws_port_draft = strings.clone(string(v))
-
-	case Obsws_Pass_Draft:
-		delete(out.obsws_pass_draft)
-		out.obsws_pass_draft = strings.clone(string(v))
-
-	case Obsws_Remember_Set:
-		sync.guard(&app.mu)
-		app.settings.obsws_remember_password = bool(v)
-		app_save_settings()
-
-	case Obsws_Connect_Requested:
-		port, ok := strconv.parse_int(strings.trim_space(out.obsws_port_draft))
-		if !ok || port < 1 || port > 65535 {
-			out = gui_toast(out, "obs-websocket port must be between 1 and 65535", .Danger)
-			return out, {}
-		}
-		sync.guard(&app.mu)
-		settings_set_string(
-			&app.settings.obsws_host, strings.trim_space(out.obsws_host_draft),
-		)
-		app.settings.obsws_port = port
-		settings_set_string(&app.settings.obsws_password, out.obsws_pass_draft)
-		app.settings.obsws_enabled = true
-		app_save_settings()
-		return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
-
-	case Obsws_Status_Changed:
-		if len(v.message) > 0 {
-			out = gui_toast(out, v.message, v.connected ? .Success : .Danger)
-			delete(v.message)
-		}
-		// Seed the sources from here rather than from the connect worker:
-		// pushing reads the boss list, and only the GUI thread may do that.
-		if v.connected do obsws_push_update()
 
 	case Help_Opened:
 		out.help_topic = Help_Topic(v)
@@ -912,9 +790,6 @@ gui_after_data_change :: proc(s: Gui) -> Gui {
 		if err := obs_text_write_all(); err != nil {
 			fmt.eprintfln("OBS text output failed: %v", err)
 		}
-	}
-	if app.settings.obsws_enabled {
-		obsws_push_update()
 	}
 	return s
 }

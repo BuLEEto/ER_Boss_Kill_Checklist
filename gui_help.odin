@@ -19,7 +19,7 @@ Help_Topic :: enum {
 	None,
 	Browser_Source,
 	Text_Files,
-	Obs_Websocket,
+	Single_Values,
 }
 
 Help_Step :: struct {
@@ -31,7 +31,7 @@ help_title :: proc(topic: Help_Topic) -> string {
 	switch topic {
 	case .Browser_Source: return "Using the browser source"
 	case .Text_Files:     return "Using the text files"
-	case .Obs_Websocket:  return "Letting the app set OBS up"
+	case .Single_Values:  return "Using the single-value pages"
 	case .None:           return ""
 	}
 	return ""
@@ -43,8 +43,8 @@ help_intro :: proc(topic: Help_Topic) -> string {
 		return "The main way to get this on stream, and the one every OBS user already knows: paste a URL into a Browser source. OBS renders the page itself, styled and laid out here, updating live — there's no refresh interval to set.\n\nTwo shapes: the overlay card, which is everything in one box, and a page per value for when you want the numbers in different corners of your layout."
 	case .Text_Files:
 		return "The most compatible option. The app keeps a folder of small text files up to date, and OBS text sources read straight from them. No browser source, no extra CPU, and it works on every version of OBS."
-	case .Obs_Websocket:
-		return "Optional, and not a third way of getting your progress on screen — it shows nothing the Browser source panel can't. What it does is create and position the sources in OBS for you, over OBS's own WebSocket server, instead of you adding eight of them by hand.\n\nCreating them as browser sources points them at the very same pages the Browser source panel hands out URLs for. Creating them as text sources is the lighter option, at the cost of the alignment and line height OBS text sources don't have."
+	case .Single_Values:
+		return "One page per value, each added to OBS as its own Browser source. Use these when you want the numbers spread around your layout rather than gathered in one card — a deaths counter in one corner, the boss list in another.\n\nThey're the same technology as the overlay card, so they get the same things an OBS text source can't do: real alignment, a line height you can set, and colours and fonts chosen here rather than per-source in OBS."
 	case .None:
 		return ""
 	}
@@ -130,59 +130,39 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 		)
 
-	case .Obs_Websocket:
+	case .Single_Values:
 		append(&steps,
 			Help_Step{
-				"Turn on the WebSocket server in OBS",
-				"OBS → Tools → WebSocket Server Settings → tick Enable WebSocket server. Note the port (4455 by default).",
+				"Copy the one you want",
+				"Each row on the Single values panel has a Copy button next to its URL. Copy the values you'll actually show — every one you add is another browser instance for OBS to run.",
 			},
 			Help_Step{
-				"Get the password",
-				"In that same dialog, Show Connect Info reveals the password. Leave the password disabled in OBS and you can skip this.",
+				"Add a Browser source per value",
+				"Sources → + → Browser, paste the URL, and set Width and Height to the space you want it to take. 760 × 90 suits a single number; a list like Region bosses wants more height, around 420.",
 			},
 			Help_Step{
-				"Fill it in here and press Connect",
-				"Host stays 127.0.0.1 if OBS is on this machine. Tick Remember the password to skip re-typing it next time — it's encrypted before it's written to disk.",
+				"Leave the background transparent",
+				"The pages have no background of their own, so they composite straight over gameplay.",
 			},
 			Help_Step{
-				"Choose the scene — nothing happens until you do",
-				"Add to scene decides where the sources are created, and it's deliberately not optional. Until you pick one the app connects and creates nothing: dropping eight sources into whichever scene happened to be live is exactly the sort of thing you'd discover mid-stream. Your scenes are listed once you've connected. Change it later and the app reconnects and adds them to the new scene — the copies in the old one are left alone, so delete those in OBS if you don't want them.",
+				"Position each one",
+				"They're ordinary browser sources — drag and scale them where you like. They update themselves whenever the numbers change; there's no refresh interval to set.",
 			},
 			Help_Step{
-				"The sources appear in that scene",
-				"ER Progress, ER Next Boss, ER Deaths, ER Attempts, ER Session, ER Character, ER Region and ER Region Bosses. They're created with a bold white font and a dark outline, stacked down the left, so they're readable and not piled on top of each other.",
+				"The URLs never change",
+				"Nothing about how a page looks is carried in its URL — it's all resolved here. So restyling a page reaches OBS on its own, and you never have to re-paste a URL you've already set up.",
 			},
 			Help_Step{
-				"Choose which ones you want",
-				"The Send to OBS list decides what gets created. Unticked sources are never added to your scene. ER Region shows an area and its count (\"Caelid (12/15)\"); ER Region Bosses lists what's left in it, one per line.",
+				"Styling them",
+				"Appearance at the bottom of the panel styles every page at once. To make one different, press Style… on its row and tick \"Style this page on its own\": it starts as a copy of the shared look and then goes its own way. Untick to put it back — what you set is kept, so you can flip between the two.",
 			},
 			Help_Step{
-				"Attempts and Session",
-				"ER Attempts is the deaths since your last boss kill — Elden Ring doesn't record deaths per boss, so that's what it counts, and dying to anything else counts too. ER Session is bosses and deaths for this sitting, and starts again each time you open the app. Both have a Reset on the Checklist tab.",
+				"Which area they follow",
+				"Region on this panel drives the Region and Region bosses pages. The overlay card and the text files have their own, so they can follow different areas.",
 			},
 			Help_Step{
-				"Text or Web?",
-				"Text makes OBS text sources: cheap, but OBS gives them no alignment and no line height, which is why a multi-line list stays ragged. Web makes each value its own small browser source instead — real CSS, so lists align and space properly. It costs a browser instance per source.",
-			},
-			Help_Step{
-				"Styling them your way (Web)",
-				"Font lists what's installed on this PC, and you can still type a name that isn't there — worth knowing if OBS is running on a different machine, because it's that machine's fonts the page is rendered with.\n\nAppearance on this panel styles these sources — accent colour, text colour, size, font, outline, and a custom CSS box for anything else. It applies to all of them at once, which OBS can't do: its own Custom CSS box belongs to a single source.\n\nThe overlay card has its own separate Appearance on the Browser source panel, so the two can look different. OBS's box still works on top, per source, and still wins.",
-			},
-			Help_Step{
-				"Aligning them individually",
-				"Align under Appearance on this panel sets all of these at once. To differ per source, open that source's properties in OBS and change align=right in its URL to left or center — or put  body { text-align: center !important }  in its Custom CSS.",
-			},
-			Help_Step{
-				"ER Overlay is the whole card",
-				"The one non-text entry either way: a browser source showing the full overlay page, everything in one box. Off by default because it overlaps the individual sources.",
-			},
-			Help_Step{
-				"Pick which area they follow",
-				"Region on this panel drives them. \"Where I last killed\" tracks you as you play; \"first unfinished\" walks the list in order; or pin an area and they stay on it. The other two integrations have their own Region, so they can follow different areas.",
-			},
-			Help_Step{
-				"Style and place them however you like",
-				"They're ordinary OBS text sources. Change the font, colour, size, position — the app only ever updates their text. A source that already exists is never created, moved or restyled, so anything you've set up stays put.",
+				"OBS's Custom CSS still works",
+				"Each browser source has its own Custom CSS box in OBS, injected after everything set here — so it's still there for a one-off tweak on a single source.",
 			},
 		)
 
@@ -196,8 +176,8 @@ help_footer :: proc(topic: Help_Topic) -> string {
 	switch topic {
 	case .Text_Files:
 		return "Text files and browser sources can run at the same time — they don't conflict, and plenty of people use both."
-	case .Obs_Websocket:
-		return "If Connect fails, check that the WebSocket server is enabled in OBS and that the port matches."
+	case .Single_Values:
+		return "If a page is blank, check the web server is running — the status is on the Overlay card panel."
 	case .Browser_Source:
 		return "If the overlay is blank, check the web server is running — the status is shown above the overlay settings."
 	case .None:

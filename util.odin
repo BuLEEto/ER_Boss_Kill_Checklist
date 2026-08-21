@@ -1,5 +1,6 @@
 package main
 
+import "core:encoding/json"
 import "core:fmt"
 import "core:strings"
 
@@ -61,4 +62,54 @@ obs_join_lines :: proc(
 	allocator := context.temp_allocator,
 ) -> string {
 	return strings.join(lines, roomy ? "\n\n" : "\n", allocator)
+}
+
+
+// ----------------------------------------------------------------------------
+// Tiny JSON readers
+//
+// Just enough to pick values out of a parsed document without unmarshalling
+// into a struct. Settings migration needs this: a migration reads keys that
+// are no longer fields, so there is nothing to unmarshal into.
+// ----------------------------------------------------------------------------
+
+json_object :: proc(v: json.Value, key: string) -> json.Value {
+	obj, ok := v.(json.Object)
+	if !ok do return nil
+	child, has := obj[key]
+	if !has do return nil
+	return child
+}
+
+json_object_opt :: proc(v: json.Value, key: string) -> (json.Value, bool) {
+	obj, ok := v.(json.Object)
+	if !ok do return nil, false
+	child, has := obj[key]
+	if !has do return nil, false
+	// An explicit null means "not present" as far as callers care.
+	if _, is_null := child.(json.Null); is_null do return nil, false
+	return child, true
+}
+
+json_string :: proc(v: json.Value, key: string) -> string {
+	child := json_object(v, key)
+	s, ok := child.(json.String)
+	if !ok do return ""
+	return string(s)
+}
+
+json_int :: proc(v: json.Value, key: string) -> i64 {
+	child := json_object(v, key)
+	#partial switch n in child {
+	case json.Integer: return i64(n)
+	case json.Float:   return i64(n)
+	}
+	return 0
+}
+
+json_bool :: proc(v: json.Value, key: string, fallback: bool) -> bool {
+	child := json_object(v, key)
+	b, ok := child.(json.Boolean)
+	if !ok do return fallback
+	return bool(b)
 }

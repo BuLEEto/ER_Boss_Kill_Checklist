@@ -101,7 +101,7 @@ deb: sdl3
 	cp -r static/* $(DEB_DIR)$(OPT_DIR)/static/
 	cp $(APP_NAME).desktop $(DEB_DIR)/usr/share/applications/
 	ln -sf $(OPT_DIR)/$(APP_NAME) $(DEB_DIR)/usr/local/bin/$(APP_NAME)
-	printf 'Package: $(APP_NAME)\nVersion: $(VERSION)\nSection: games\nPriority: optional\nArchitecture: $(ARCH)\nDepends: libvulkan1\nMaintainer: support@haxenabled.net\nDescription: Elden Ring Boss Checklist\n Native boss kill tracker with OBS overlay, text-file and\n obs-websocket output. Reads save files in read-only mode\n (safe with EAC).\n .\n SDL3 is bundled, so this installs on distributions that do not\n package it. Needs a working Vulkan driver.\n' > $(DEB_DIR)/DEBIAN/control
+	printf 'Package: $(APP_NAME)\nVersion: $(VERSION)\nSection: games\nPriority: optional\nArchitecture: $(ARCH)\nDepends: libvulkan1\nMaintainer: support@haxenabled.net\nDescription: Elden Ring Boss Checklist\n Native boss kill tracker with OBS browser-source overlays\n and text-file output. Reads save files in read-only mode\n (safe with EAC).\n .\n SDL3 is bundled, so this installs on distributions that do not\n package it. Needs a working Vulkan driver.\n' > $(DEB_DIR)/DEBIAN/control
 	printf '#!/bin/sh\nupdate-desktop-database /usr/share/applications 2>/dev/null || true\n' > $(DEB_DIR)/DEBIAN/postinst
 	printf '#!/bin/sh\nupdate-desktop-database /usr/share/applications 2>/dev/null || true\n' > $(DEB_DIR)/DEBIAN/postrm
 	chmod 755 $(DEB_DIR)/DEBIAN/postinst $(DEB_DIR)/DEBIAN/postrm

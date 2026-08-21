@@ -547,7 +547,17 @@ handle_widget :: proc(req: ^http.Request, res: ^http.Response) {
 
 	sync.shared_guard(&app.mu)
 
-	align := len(align_param) > 0 ? align_param : app.settings.ws_look.align
+	// This page's own look when it has one, else the shared one. Resolved
+	// here rather than carried in the URL, so restyling reaches a source
+	// that's already in OBS without anyone re-pasting anything.
+	look := app.settings.ws_look
+	if k, known := widget_kind_from_slug(kind_param); known {
+		look = settings_widget_appearance(k)
+	}
+
+	// The query parameter still wins, for a hand-edited URL that wants one
+	// source aligned differently without a setting for it.
+	align := len(align_param) > 0 ? align_param : look.align
 	body_class := ""
 	if align == "right" || align == "center" {
 		body_class = fmt.tprintf("align-%s", align)
@@ -577,7 +587,7 @@ handle_widget :: proc(req: ^http.Request, res: ^http.Response) {
 		// furniture when you already know what you put on screen.
 		show_label = label_param == "true",
 		body_class = body_class,
-		theme_css  = overlay_theme_css(app.settings.ws_look),
+		theme_css  = overlay_theme_css(look),
 	}
 
 	http.template_respond_with(res, tpl, data)

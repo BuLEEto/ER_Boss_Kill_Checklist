@@ -5,7 +5,6 @@ import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
-import sb "src/libs/sbcrypto"
 
 // ============================================================================
 // Settings
@@ -54,7 +53,9 @@ POLL_SECONDS_DEFAULT :: 5
 //   4  region pinned by name rather than index; per-source obsws toggles
 //   5  region selection grew a mode, so "pinned" is distinct from "auto"
 //   6  region and appearance are per-integration rather than shared
-SETTINGS_VERSION :: 7
+//   7  attempts bookmark, kill banner, and the overlay card's own text size
+//   8  obs-websocket removed; the single-value pages get per-page looks
+SETTINGS_VERSION :: 8
 
 // Which region an integration follows. One of these per integration
 // rather than one shared between them: the OBS tab has a panel per
@@ -120,6 +121,18 @@ appearance_apply_bounds :: proc(a: ^Appearance) {
 	}
 }
 
+// A single-value page's own appearance, or the absence of one.
+//
+// `custom` off means the page follows the shared look and `look` is
+// ignored; on means `look` is used whole. Storing the slug rather than
+// relying on array position keeps someone's styling attached to the page
+// they set it on even if Widget_Kind is reordered later.
+Widget_Look :: struct {
+	slug:   string     `json:"slug"`,
+	custom: bool       `json:"custom"`,
+	look:   Appearance `json:"look"`,
+}
+
 region_choice_apply_bounds :: proc(r: ^Region_Choice) {
 	switch r.mode {
 	case "first", "last_kill", "pinned": // fine
@@ -170,53 +183,25 @@ Settings :: struct {
 	obs_text_enabled: bool   `json:"obs_text_enabled"`,
 	obs_text_dir:     string `json:"obs_text_dir"`,
 
-	// obs-websocket v5
-	obsws_enabled:           bool   `json:"obsws_enabled"`,
-	obsws_host:              string `json:"obsws_host"`,
-	obsws_port:              int    `json:"obsws_port"`,
-	obsws_remember_password: bool   `json:"obsws_remember_password"`,
-
-	// Which scene new sources are created in. Empty means "whatever is
-	// live when we connect", which is what the app used to do
-	// unconditionally — and which quietly dropped sources into whichever
-	// scene happened to be on air at the time, Starting Soon included.
-	obsws_scene: string `json:"obsws_scene"`,
-
-	// Which of the six text sources the app creates and updates in OBS.
-	// Named individually rather than packed into a bitmask so the file
-	// stays legible — this is a config someone might open and edit.
-	obsws_send_progress:      bool `json:"obsws_send_progress"`,
-	obsws_send_next_boss:     bool `json:"obsws_send_next_boss"`,
-	obsws_send_deaths:        bool `json:"obsws_send_deaths"`,
-	obsws_send_character:     bool `json:"obsws_send_character"`,
-	obsws_send_region:        bool `json:"obsws_send_region"`,
-	obsws_send_region_bosses: bool `json:"obsws_send_region_bosses"`,
-	obsws_send_attempts:      bool `json:"obsws_send_attempts"`,
-	obsws_send_session:       bool `json:"obsws_send_session"`,
-
-	// The overlay page itself, as a browser source. Off by default: it
-	// overlaps what the individual sources show, so having both appear
-	// uninvited would be a mess.
-	obsws_send_overlay: bool `json:"obsws_send_overlay"`,
-
-	// What the individual sources are made of:
-	//
-	//   "text"  OBS text sources. Cheap — no browser instance — but OBS
-	//           gives them no alignment and no line height.
-	//   "web"   One small browser source each, pointed at /widget. Real
-	//           CSS: alignment, line height, restyling via Custom CSS.
-	//           Costs a Chromium instance per source.
-	obsws_source_style: string `json:"obsws_source_style"`,
-
-	// Blank line between entries in the multi-line outputs. OBS text
+	// Blank line between entries in the multi-line text files. OBS text
 	// sources have no line-height setting — it's been a feature request
-	// for years — so the only way to loosen them up is to send the extra
-	// line ourselves. One per integration, same reasoning as the rest.
+	// for years — so the only way to loosen them up is to write the extra
+	// line ourselves. The served pages don't need this; they have CSS.
 	text_roomy_lines: bool `json:"text_roomy_lines"`,
-	ws_roomy_lines:   bool `json:"ws_roomy_lines"`,
-	// Encrypted at rest — see obsws_password_enc below and
-	// src/libs/sbcrypto. Held in memory decrypted.
-	obsws_password:          string `json:"obsws_password_enc"`,
+
+	// Per-page appearance overrides for the single-value pages.
+	//
+	// Whole-struct, not per-field: a page either follows ws_look or has a
+	// look entirely of its own, seeded from the shared one when the user
+	// first customises it. Per-field inheritance would need every setting
+	// to carry a third "not set" state, and "why did that one not change?"
+	// is a worse question to have to answer than "this page is customised".
+	//
+	// Fixed array rather than a slice, so settings stay allocation-free
+	// apart from their strings; matched by `slug` on load rather than by
+	// position, so reordering Widget_Kind can't shuffle someone's styling
+	// onto the wrong page.
+	widget_looks: [len(Widget_Kind)]Widget_Look `json:"widget_looks"`,
 
 	// ---- Attempts ------------------------------------------------------
 	//
@@ -272,32 +257,7 @@ default_settings :: proc() -> Settings {
 
 		obs_text_enabled = false,
 
-		obsws_enabled = false,
-		obsws_host    = "127.0.0.1",
-		obsws_port    = 4455,
-
-		obsws_send_progress      = true,
-		obsws_send_next_boss     = true,
-		obsws_send_deaths        = true,
-		obsws_send_character     = true,
-		obsws_send_region        = true,
-		obsws_send_region_bosses = true,
-		obsws_send_overlay       = false,
-		obsws_send_attempts      = true,
-		obsws_send_session       = false,
-		// Browser sources by default: they're the same pages the Browser
-		// source panel serves, so one Appearance styles everything and
-		// alignment works. Existing installs keep whatever they chose —
-		// swapping someone's source kind under them would mean recreating
-		// sources they'd already placed.
-		obsws_source_style       = "web",
-
-		attempts_slot       = -1,
-		kill_banner_enabled = true,
-		kill_banner_seconds = KILL_BANNER_SECONDS_DEFAULT,
-
 		text_roomy_lines = true,
-		ws_roomy_lines   = true,
 
 		theme    = "elden",
 		ui_scale = 1.15, // Skald's stock 14px body text is small on a big display
@@ -405,17 +365,6 @@ load_settings_file :: proc(allocator := context.allocator) -> (s: Settings, err:
 			return s, nil
 		}
 
-		// A password that won't open is one this machine didn't write:
-		// another machine's config, a corrupted file, or a plaintext
-		// password from a version before this field was encrypted. In
-		// every case the right move is to drop it and let the user
-		// re-enter it once.
-		if plain, ok := sb.decrypt_string(decoded.obsws_password, context.temp_allocator); ok {
-			decoded.obsws_password = plain
-		} else {
-			decoded.obsws_password = ""
-		}
-
 		s = decoded
 		migrate_v5(&s, raw)
 	}
@@ -451,12 +400,8 @@ settings_own_strings :: proc(s: ^Settings, allocator := context.allocator) {
 		&s.boss_list,
 		&s.overlay_mode,
 		&s.overlay_bg,
-		&s.obsws_source_style,
 		&s.last_kill_region,
 		&s.obs_text_dir,
-		&s.obsws_host,
-		&s.obsws_password,
-		&s.obsws_scene,
 		&s.theme,
 		&s.browser_region.mode,
 		&s.browser_region.name,
@@ -478,6 +423,65 @@ settings_own_strings :: proc(s: ^Settings, allocator := context.allocator) {
 	for f in fields {
 		f^ = strings.clone(f^, allocator)
 	}
+
+	// The per-page looks carry strings too, and they're freed the same way
+	// when a setting changes — so they have to be heap-owned like the rest.
+	for &w in s.widget_looks {
+		w.slug = strings.clone(w.slug, allocator)
+		w.look.accent = strings.clone(w.look.accent, allocator)
+		w.look.text_color = strings.clone(w.look.text_color, allocator)
+		w.look.font_family = strings.clone(w.look.font_family, allocator)
+		w.look.custom_css = strings.clone(w.look.custom_css, allocator)
+		w.look.align = strings.clone(w.look.align, allocator)
+	}
+}
+
+// One page's stored look. Slot i belongs to Widget_Kind(i), always —
+// settings_normalise_widget_looks guarantees that at load, so this is a
+// plain index with nothing to search and nothing to allocate.
+//
+// That matters more than it looks: this is read by the HTTP workers, which
+// hold only a shared lock. An accessor that lazily filled in a missing
+// slot would be writing under a read lock from several threads at once,
+// which is how the array ended up with a page marked as customised that
+// nobody had customised.
+settings_widget_look :: proc(k: Widget_Kind) -> ^Widget_Look {
+	return &app.settings.widget_looks[int(k)]
+}
+
+// What a page should actually be drawn with: its own look when it has
+// one, otherwise the look shared by all of them.
+settings_widget_appearance :: proc(k: Widget_Kind) -> Appearance {
+	w := settings_widget_look(k)
+	if w.custom do return w.look
+	return app.settings.ws_look
+}
+
+// Put every stored look in the slot its page owns.
+//
+// The file records a slug per entry, so a settings file written before a
+// Widget_Kind was added, removed or reordered still lands its styling on
+// the right page. Anything whose slug isn't a page any more is dropped;
+// pages with nothing stored get an empty slot. Runs once, at load, on the
+// GUI thread — after which the array is only ever indexed.
+settings_normalise_widget_looks :: proc(s: ^Settings) {
+	stored := s.widget_looks
+	s.widget_looks = {}
+
+	for k in Widget_Kind {
+		slug := widget_slug(k)
+		for w in stored {
+			if w.slug == slug {
+				s.widget_looks[int(k)] = w
+				break
+			}
+		}
+	}
+	// Deliberately not writing the slug back here. Every string in live
+	// settings is heap-owned so that changing one can free the old value,
+	// and widget_slug returns a literal — storing one would arm a delete
+	// on a string literal, which is a segfault rather than a leak.
+	// save_settings_file stamps the slugs onto its own copy instead.
 }
 
 // Replace a settings string, freeing what was there.
@@ -569,20 +573,21 @@ migrate_v5 :: proc(s: ^Settings, raw: []byte) {
 
 	s.browser_region, s.text_region, s.ws_region = region, region, region
 	s.browser_look, s.ws_look = look, look
-	s.text_roomy_lines, s.ws_roomy_lines = roomy, roomy
+	s.text_roomy_lines = roomy
 }
 
 save_settings_file :: proc(s: Settings) -> os.Error {
 	out := s
 	out.version = SETTINGS_VERSION
 
-	// The password is the one field that never goes to disk as typed.
-	// encrypt_string returns "" if this machine can't produce a key, in
-	// which case we store nothing rather than falling back to plaintext.
-	if out.obsws_remember_password {
-		out.obsws_password = sb.encrypt_string(out.obsws_password, context.temp_allocator)
-	} else {
-		out.obsws_password = ""
+	// Stamp each stored look with the page it belongs to. In memory the
+	// slot's position is what identifies it; on disk the slug is, so a
+	// later build that reorders or renames Widget_Kind can still put
+	// everyone's styling back where it belongs. Safe to assign literals
+	// here because `out` is a copy that's marshalled and dropped — nothing
+	// ever frees these.
+	for k in Widget_Kind {
+		out.widget_looks[int(k)].slug = widget_slug(k)
 	}
 
 	data, jerr := json.marshal(out, {pretty = true}, context.temp_allocator)
@@ -614,7 +619,6 @@ settings_apply_bounds :: proc(s: ^Settings) {
 		s.poll_seconds = POLL_SECONDS_DEFAULT
 	}
 	if s.server_port < 1 || s.server_port > 65535 do s.server_port = 3000
-	if s.obsws_port < 1 || s.obsws_port > 65535 do s.obsws_port = 4455
 	if s.overlay_next_count < 1 || s.overlay_next_count > 50 do s.overlay_next_count = 8
 
 	switch s.overlay_mode {
@@ -625,11 +629,6 @@ settings_apply_bounds :: proc(s: ^Settings) {
 	case "none", "green", "magenta": // fine
 	case:                            s.overlay_bg = "none"
 	}
-	switch s.obsws_source_style {
-	case "text", "web": // fine
-	case:               s.obsws_source_style = "text"
-	}
-
 	if s.kill_banner_seconds < KILL_BANNER_SECONDS_MIN ||
 	   s.kill_banner_seconds > KILL_BANNER_SECONDS_MAX {
 		s.kill_banner_seconds = KILL_BANNER_SECONDS_DEFAULT
@@ -647,12 +646,15 @@ settings_apply_bounds :: proc(s: ^Settings) {
 	region_choice_apply_bounds(&s.ws_region)
 	appearance_apply_bounds(&s.browser_look)
 	appearance_apply_bounds(&s.ws_look)
+	settings_normalise_widget_looks(s)
+	for &w in s.widget_looks {
+		if w.custom do appearance_apply_bounds(&w.look)
+	}
 
 	switch s.theme {
 	case "elden", "dark", "light", "system": // fine
 	case:                                    s.theme = "elden"
 	}
-	if len(s.obsws_host) == 0 do s.obsws_host = "127.0.0.1"
 
 	// Absent in files written before the setting existed, where the JSON
 	// decoder leaves the default in place — this only catches a hand-edit
