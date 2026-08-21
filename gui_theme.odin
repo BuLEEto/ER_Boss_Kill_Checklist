@@ -13,24 +13,26 @@ import "gui:skald"
 // them. Nothing here reads a setting belonging to a different panel.
 // ============================================================================
 
-// The panels that serve a styled page and so have an appearance.
+// The pages this app serves that can be styled. Named for the page, not
+// for how it reached OBS — the widget pages are the same pages whether
+// the user pasted their URL by hand or let the app create the sources.
 Look_Target :: enum {
-	Browser,   // the overlay card
-	Websocket, // the individual widget pages
+	Browser, // the overlay card
+	Widget,  // the individual single-value pages
 }
 
-// The panels that show a region. Text files have no appearance but do
+// What can be pointed at a region. Text files have no appearance but do
 // have a region, hence two enums rather than one.
 Region_Target :: enum {
 	Browser,
 	Text,
-	Websocket,
+	Widget,
 }
 
 settings_look :: proc(t: Look_Target) -> ^Appearance {
 	switch t {
 	case .Browser:   return &app.settings.browser_look
-	case .Websocket: return &app.settings.ws_look
+	case .Widget:  return &app.settings.ws_look
 	}
 	return &app.settings.browser_look
 }
@@ -39,7 +41,7 @@ settings_region :: proc(t: Region_Target) -> ^Region_Choice {
 	switch t {
 	case .Browser:   return &app.settings.browser_region
 	case .Text:      return &app.settings.text_region
-	case .Websocket: return &app.settings.ws_region
+	case .Widget:  return &app.settings.ws_region
 	}
 	return &app.settings.browser_region
 }

@@ -285,7 +285,12 @@ default_settings :: proc() -> Settings {
 		obsws_send_overlay       = false,
 		obsws_send_attempts      = true,
 		obsws_send_session       = false,
-		obsws_source_style       = "text",
+		// Browser sources by default: they're the same pages the Browser
+		// source panel serves, so one Appearance styles everything and
+		// alignment works. Existing installs keep whatever they chose —
+		// swapping someone's source kind under them would mean recreating
+		// sources they'd already placed.
+		obsws_source_style       = "web",
 
 		attempts_slot       = -1,
 		kill_banner_enabled = true,

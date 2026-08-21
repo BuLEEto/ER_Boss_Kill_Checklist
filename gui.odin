@@ -25,16 +25,21 @@ Tab :: enum {
 
 TAB_LABELS :: [?]string{"Setup", "Checklist", "OBS", "About"}
 
-// The OBS tab covers three separate integrations, each with its own setup
-// in OBS itself. Stacking all three down one page meant no way to tell
-// which controls belonged to which — so they get a panel each.
+// The OBS tab's panels.
+//
+// Browser and Text are the two ways data actually leaves this app. Setup
+// is not a third: it's obs-websocket, which creates and positions the
+// sources in OBS for you and then gets out of the way. Presenting it as a
+// peer of the other two was the thing that made this tab confusing — it
+// reads as a third way to get the same numbers on screen, when it's
+// really a shortcut for the first one.
 Obs_Tab :: enum {
 	Browser,
 	Text,
-	Websocket,
+	Setup,
 }
 
-OBS_TAB_LABELS :: [?]string{"Browser source", "Text files", "obs-websocket"}
+OBS_TAB_LABELS :: [?]string{"Browser source", "Text files", "Set up OBS for me"}
 
 Gui :: struct {
 	// Set false until the first frame has asked for the poll loop to
@@ -63,6 +68,9 @@ Gui :: struct {
 	obsws_port_draft:   string,
 	obsws_pass_draft:   string,
 	custom_css_draft:   [Look_Target]string,
+
+	// Purely view state — whether the single-value URL list is expanded.
+	widget_urls_open: bool,
 
 	// Save-file polling
 	last_mtime: i64,
@@ -127,6 +135,7 @@ Kill_Banner_Secs :: distinct int
 Attempts_Reset :: struct {}
 Session_Reset :: struct {}
 Obsws_Scene_Selected :: distinct string
+Widget_Urls_Toggled :: distinct bool
 Hide_Completed_Set :: distinct bool
 Theme_Selected :: distinct string
 Ui_Scale_Selected :: distinct f32
@@ -217,6 +226,7 @@ Msg :: union {
 	Attempts_Reset,
 	Session_Reset,
 	Obsws_Scene_Selected,
+	Widget_Urls_Toggled,
 	Hide_Completed_Set,
 	Theme_Selected,
 	Ui_Scale_Selected,
@@ -452,6 +462,9 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		app_reset_session()
 		out = gui_after_data_change(out)
 		out = gui_toast(out, "Session counters reset", .Success)
+
+	case Widget_Urls_Toggled:
+		out.widget_urls_open = bool(v)
 
 	case Obsws_Scene_Selected:
 		sync.guard(&app.mu)

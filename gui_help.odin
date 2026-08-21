@@ -6,10 +6,9 @@ import "gui:skald"
 // ============================================================================
 // Help sheets
 //
-// The OBS tab offers three integrations and assumes you know OBS. Two of
-// them are only obvious if you already do — nobody looks at "write text
-// files" and knows that means adding a Text (GDI+) source with "Read from
-// file" ticked.
+// The OBS tab assumes you know OBS, and some of it is only obvious if you
+// already do — nobody looks at "write text files" and knows that means
+// adding a Text (GDI+) source with "Read from file" ticked.
 //
 // Each sheet is a modal: numbered steps, the exact source type to add, and
 // the exact path or setting to paste. Kept in the app rather than linked
@@ -32,7 +31,7 @@ help_title :: proc(topic: Help_Topic) -> string {
 	switch topic {
 	case .Browser_Source: return "Using the browser source"
 	case .Text_Files:     return "Using the text files"
-	case .Obs_Websocket:  return "Using obs-websocket"
+	case .Obs_Websocket:  return "Letting the app set OBS up"
 	case .None:           return ""
 	}
 	return ""
@@ -41,11 +40,11 @@ help_title :: proc(topic: Help_Topic) -> string {
 help_intro :: proc(topic: Help_Topic) -> string {
 	switch topic {
 	case .Browser_Source:
-		return "The best-looking option: OBS renders the overlay page itself, styled and laid out for you. It updates live — there's no refresh interval to set."
+		return "The main way to get this on stream, and the one every OBS user already knows: paste a URL into a Browser source. OBS renders the page itself, styled and laid out here, updating live — there's no refresh interval to set.\n\nTwo shapes: the overlay card, which is everything in one box, and a page per value for when you want the numbers in different corners of your layout."
 	case .Text_Files:
 		return "The most compatible option. The app keeps a folder of small text files up to date, and OBS text sources read straight from them. No browser source, no extra CPU, and it works on every version of OBS."
 	case .Obs_Websocket:
-		return "How most OBS tools integrate. The app connects to OBS's own WebSocket server and updates text sources directly, so there's no file or web page in between."
+		return "Optional, and not a third way of getting your progress on screen — it shows nothing the Browser source panel can't. What it does is create and position the sources in OBS for you, over OBS's own WebSocket server, instead of you adding eight of them by hand.\n\nCreating them as browser sources points them at the very same pages the Browser source panel hands out URLs for. Creating them as text sources is the lighter option, at the cost of the alignment and line height OBS text sources don't have."
 	case .None:
 		return ""
 	}
@@ -196,7 +195,7 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 help_footer :: proc(topic: Help_Topic) -> string {
 	switch topic {
 	case .Text_Files:
-		return "All three integrations can run at once — text files and a browser source don't conflict."
+		return "Text files and browser sources can run at the same time — they don't conflict, and plenty of people use both."
 	case .Obs_Websocket:
 		return "If Connect fails, check that the WebSocket server is enabled in OBS and that the port matches."
 	case .Browser_Source:

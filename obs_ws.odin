@@ -76,6 +76,24 @@ obs_source_name :: proc(k: Obs_Source) -> string {
 	return ""
 }
 
+// Just the value's name, for lists where the surrounding text already
+// says what these are. obs_source_label spells out an example as well,
+// which reads as noise once you have eight of them in a column.
+obs_source_short_label :: proc(k: Obs_Source) -> string {
+	switch k {
+	case .Progress:      return "Progress"
+	case .Next_Boss:     return "Next boss"
+	case .Deaths:        return "Deaths"
+	case .Character:     return "Character"
+	case .Region:        return "Region"
+	case .Region_Bosses: return "Region bosses"
+	case .Attempts:      return "Attempts"
+	case .Session:       return "Session"
+	case .Overlay:       return "Overlay page"
+	}
+	return ""
+}
+
 obs_source_label :: proc(k: Obs_Source) -> string {
 	switch k {
 	case .Progress:      return "Progress — \"113 / 207 bosses\""
@@ -658,10 +676,9 @@ obsws_browser_settings :: proc(with_size := false) -> string {
 obsws_widget_settings :: proc(kind: Obs_Source, with_size := false) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	strings.write_string(&b, `{"url":"`)
-	json_escape_string(&b, fmt.tprintf(
-		"http://localhost:%d/widget?type=%s&align=%s",
-		app.server.port, obs_source_widget(kind), app.settings.ws_look.align,
-	))
+	// The same builder the Copy button uses, so a source the app creates
+	// and one the user pastes in are identical.
+	json_escape_string(&b, widget_url_string(kind, context.temp_allocator))
 	strings.write_string(&b, `"`)
 	if with_size {
 		// Wide enough for the longest boss name; lists get more height.

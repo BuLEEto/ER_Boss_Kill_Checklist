@@ -24,12 +24,15 @@ beaten — safe to use with EAC.
   between restarts
 - Elden Ring colour theme by default (Dark, Light and follow-the-OS also
   available), with an adjustable text size
-- **Three OBS integrations**, use whichever suits you:
-  - **Browser source** — the transparent overlay page, the best-looking option
+- **Two ways into OBS**:
+  - **Browser source** — paste a URL, the way every OBS overlay works. Either
+    the whole card in one source, or a page per value to scatter round your
+    layout. Styled here, updates live
   - **Text files** — plain text files for OBS "Text (GDI+/FreeType)" sources
     set to *Read from file*. Works on any OBS version, no browser source
-  - **obs-websocket** — connects to OBS directly and keeps text sources
-    updated, the way most OBS tools work. You choose which scene they go in
+- Optionally, **let the app set OBS up for you** over obs-websocket: it creates
+  and positions the sources in the scene you choose, so you don't add eight by
+  hand
 - Mobile companion page for single-monitor players
 
 ## Building
@@ -101,26 +104,44 @@ The **About** tab shows the exact path.
 
 ## OBS
 
-All three live on the **OBS** tab, one panel each — **Browser source**, **Text
-files**, **obs-websocket** — because each has its own setup on the OBS side and
-stacking them down one page made it impossible to tell which controls belonged
-to which. They can all run at the same time.
+The **OBS** tab has three panels, but only two of them are ways of getting your
+progress on screen:
+
+| Panel | What it is |
+|---|---|
+| **Browser source** | Paste a URL into an OBS Browser source. The standard way overlays work, the best looking, and the only one where alignment, line height and the kill banner are possible. Start here. |
+| **Text files** | Plain files that OBS text sources read. Works on any OBS version, costs nothing, and other tools can read them too. |
+| **Set up OBS for me** | Not a third way — it shows nothing the first panel can't. It connects over obs-websocket and *creates* the sources for you, in a scene you pick, so you don't add eight by hand. Optional. |
+
+That last one used to be presented as a peer of the other two, which made the
+tab read as three competing ways to do the same job. It isn't: in its default
+mode it creates browser sources pointed at the very same pages the **Browser
+source** panel hands out URLs for.
 
 Each panel has a **? How do I use this** button with step-by-step OBS
 instructions: which source type to add, where the setting lives, what each
 value is.
 
-Each panel is self-contained: **Region** and **Appearance** belong to the
-integration, not to the app. The overlay can sit on Caelid in gold while the
-text files follow the first unfinished area and the websocket widgets show
-Altus Plateau at 64px — which is usually what you want when two of them are on
-screen at once, since you'd rarely show the same thing twice.
+**Region** and **Appearance** belong to the page, not to the app — so the
+overlay card can sit on Caelid in gold while the single-value pages show Altus
+Plateau at 64px and the text files follow the first unfinished area. That's
+usually what you want when more than one is on screen, since you'd rarely show
+the same thing twice.
 
 ### Browser source (best looking)
 
 Leave *Run the web server* on, pick your overlay mode (summary / next up /
 region) and background, then copy the URL into an OBS **Browser Source**. The
 page updates live over server-sent events — no refresh interval to tune.
+
+This panel serves two shapes, each with its own Region and Appearance:
+
+- **The overlay card** — everything in one box. One source, one URL. This is
+  what most people want, and it's the cheapest: one browser instance.
+- **One value per source** — a page per value (progress, attempts, next boss,
+  and the rest) under *One value per source*, each with a Copy button. For a
+  layout where the numbers live in different corners. Add only what you need;
+  each is its own browser instance.
 
 **Region** decides which area this integration shows. Each of the three has its
 own, set on its own panel:
