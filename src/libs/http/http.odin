@@ -759,6 +759,10 @@ handle_connection :: proc(server: ^Server, client: net.TCP_Socket, addr: net.End
 					clean_rel == "." ||
 					clean_rel == ".." ||
 					strings.has_prefix(clean_rel, "../") ||
+					// filepath.clean rewrites the fragment with the
+					// platform separator, so on Windows an escape leaves
+					// here as `..\` and the check above walks past it.
+					strings.has_prefix(clean_rel, `..\`) ||
 					strings.has_prefix(clean_rel, "/")
 				if bad_rel_path {
 					response_status(&res, .Forbidden)
@@ -2409,8 +2413,33 @@ Template_Set :: struct {
 	allocator: mem.Allocator,
 }
 
+// Guard for a path fragment that came out of a URL. `/` is the only
+// separator a URL has, so a backslash there is either an attempt to
+// smuggle a Windows separator past the traversal checks or it is junk —
+// rejected on every platform.
 path_contains_unsafe_chars :: proc(path: string) -> bool {
 	return strings.contains(path, "\\") || strings.contains(path, "\x00")
+}
+
+// Guard for a local filesystem path, which has already been through
+// filepath.clean or filepath.join and so carries the platform's own
+// separator.
+//
+// Windows uses `\` for that, which means the URL rule above rejects every
+// legitimate path there — serve_static_file answered File_Not_Found for
+// every file under static/ because the joined path contained separators.
+// Traversal is caught by path_is_within_root_resolved, which resolves the
+// path for real rather than pattern-matching it.
+local_path_is_unsafe :: proc(path: string) -> bool {
+	if strings.contains(path, "\x00") {
+		return true
+	}
+	when ODIN_OS != .Windows {
+		if strings.contains(path, "\\") {
+			return true
+		}
+	}
+	return false
 }
 
 path_is_within_root_resolved :: proc(root_path, target_path: string) -> bool {
@@ -2435,17 +2464,45 @@ path_is_within_root_resolved :: proc(root_path, target_path: string) -> bool {
 		return false
 	}
 
-	if root_clean == "/" {
-		return strings.has_prefix(target_clean, "/")
+	root := path_comparison_form(root_clean)
+	target := path_comparison_form(target_clean)
+
+	if root == "/" {
+		return strings.has_prefix(target, "/")
 	}
 
-	root_prefix := strings.concatenate({root_clean, "/"}, context.temp_allocator)
-	return target_clean == root_clean || strings.has_prefix(target_clean, root_prefix)
+	// A drive root normalises to "c:/", which already ends in the
+	// separator — appending a second one would match nothing.
+	root_prefix := root
+	if !strings.has_suffix(root, "/") {
+		root_prefix = strings.concatenate({root, "/"}, context.temp_allocator)
+	}
+	return target == root || strings.has_prefix(target, root_prefix)
+}
+
+// Put a resolved path into the form the comparisons above need: one
+// separator, and on Windows one case — NTFS matches names
+// case-insensitively, and os.stat's fullpath need not come back in the
+// casing the caller used.
+//
+// Without this the prefix test compared `C:\dir\file` against a prefix
+// built as `C:\dir/`, which can never match. Every file in a
+// subdirectory read as an escape attempt, so the app could load
+// bosses.json sitting beside the executable but not templates/overlay.html
+// one level down.
+@(private = "file")
+path_comparison_form :: proc(path: string) -> string {
+	when ODIN_OS == .Windows {
+		slashed, _ := strings.replace_all(path, "\\", "/", context.temp_allocator)
+		return strings.to_lower(slashed, context.temp_allocator)
+	} else {
+		return path
+	}
 }
 
 // Load a single template from file
 template_load :: proc(path: string, allocator := context.allocator) -> (^Template, Error) {
-	if path_contains_unsafe_chars(path) {
+	if local_path_is_unsafe(path) {
 		return nil, .File_Not_Found
 	}
 
@@ -4116,7 +4173,7 @@ send_error_response :: proc(socket: net.TCP_Socket, status: Status) {
 
 // Serve static file with path traversal and symlink escape protection
 serve_static_file :: proc(res: ^Response, path: string, root_dir: string = ".") -> Error {
-	if path_contains_unsafe_chars(path) {
+	if local_path_is_unsafe(path) {
 		return .File_Not_Found
 	}
 
