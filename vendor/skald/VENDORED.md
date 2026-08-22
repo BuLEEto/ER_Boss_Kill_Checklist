@@ -2,9 +2,9 @@
 
 Upstream: <https://github.com/BuLEEto/Skald>
 
-    Commit:  8b782d3859463ebc91905d1d3b8fe0d8289c81e5
-    Date:    2026-08-21 11:54:27 +0100
-    Subject: fix: wheel-scroll dropdowns nested in a scrolling page
+    Commit:  e0673901ee80dae4811656138da5250bbb6b9c1d
+    Date:    2026-08-22 17:26:27 +0100
+    Subject: combobox: keep the popover open when it flips above and overlaps the trigger
 
 Licence: zlib — see `LICENSE`. Bundled-asset and third-party
 acknowledgements are in `NOTICE`.
