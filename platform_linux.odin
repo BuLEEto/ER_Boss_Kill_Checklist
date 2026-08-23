@@ -28,3 +28,7 @@ detect_lan_ip :: proc() -> string {
 
 	return fmt.aprintf("%d.%d.%d.%d", a[0], a[1], a[2], a[3])
 }
+
+// Linux builds keep their console, so fatal() has already said its piece
+// on stderr by the time we get here.
+show_fatal_dialog :: proc(message: string) {}

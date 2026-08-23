@@ -169,7 +169,7 @@ uninstall:
 # ----------------------------------------------------------------------------
 
 windows:
-	odin build . $(ODIN_FLAGS) -o:speed -out:$(APP_NAME).exe -target:windows_amd64
+	odin build . $(ODIN_FLAGS) -o:speed -subsystem:windows -out:$(APP_NAME).exe -target:windows_amd64
 
 zip-win: windows
 	rm -rf $(WIN_DIR)

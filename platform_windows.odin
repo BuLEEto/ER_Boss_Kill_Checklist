@@ -3,6 +3,7 @@ package main
 
 import "core:net"
 import "core:strings"
+import "core:sys/windows"
 
 // See platform_linux.odin for why this works — same UDP routing trick,
 // expressed through core:net because Winsock's getsockname needs more
@@ -24,4 +25,18 @@ detect_lan_ip :: proc() -> string {
 	addr := net.to_string(ep.address)
 	if addr == "0.0.0.0" || addr == "127.0.0.1" do return ""
 	return strings.clone(addr)
+}
+
+// Release builds link with -subsystem:windows so no console flashes up
+// beside the window. That also means eprintln goes nowhere, and a startup
+// failure would be an exit with no explanation — exactly the shape of the
+// "Could not load templates/overlay.html" bug, minus any way to see it.
+// So put the message in front of the user instead.
+show_fatal_dialog :: proc(message: string) {
+	windows.MessageBoxW(
+		nil,
+		windows.utf8_to_wstring(message),
+		windows.utf8_to_wstring("Elden Ring Boss Checklist"),
+		windows.MB_OK | windows.MB_ICONERROR,
+	)
 }

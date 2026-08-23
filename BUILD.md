@@ -77,9 +77,14 @@ a dev tree, where no such file exists, the loader just falls through to
 ## Windows
 
 ```cmd
-odin build . -collection:gui=vendor/skald -o:speed -out:er-boss-checklist.exe
+odin build . -collection:gui=vendor/skald -o:speed -subsystem:windows -out:er-boss-checklist.exe
 copy "%ODIN_ROOT%\vendor\sdl3\SDL3.dll" .
 ```
+
+`-subsystem:windows` is what stops a console window opening beside the
+app. Drop it for a debug build and the startup banner and any
+`eprintln` become visible again; with it, `fatal()` reports through a
+message box instead (see `platform_windows.odin`).
 
 For a release zip, ship:
 

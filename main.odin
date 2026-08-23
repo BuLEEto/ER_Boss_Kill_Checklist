@@ -145,6 +145,7 @@ shutdown :: proc() {
 
 fatal :: proc(message: string) {
 	fmt.eprintln(message)
+	show_fatal_dialog(message)
 	os.exit(1)
 }
 
