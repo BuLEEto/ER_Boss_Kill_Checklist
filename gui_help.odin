@@ -72,7 +72,7 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 			Help_Step{
 				"Paste the URL and size the source",
-				"Put it in the URL field, then set Width and Height to the size you want the card to be — the card fills the source exactly, so the box you drag in OBS is the card you see. 500 × 800 suits summary mode, less for next-up.",
+				"Put it in the URL field, then set Width and Height to the Card size shown on this panel — the card fills the source exactly, so a source that size is the card with nothing spare around it.\n\nThat number appears once the page has loaded for the first time, and it follows your mode, region and text size rather than being a fixed guess. If you have obs-websocket connected, the last panel can create this source and keep it at that size for you.",
 			},
 			Help_Step{
 				"Dark panel, or just the text",
@@ -92,7 +92,7 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 			Help_Step{
 				"Boss defeated banner",
-				"When a boss dies the overlay announces it by name for a few seconds, then goes back to the numbers. It sits at the bottom of the browser source, so give the source some height below the card — with the source cropped tight to the card there's nowhere for it to go and it will overlap.\n\nIt uses this panel's accent and text colours. Turn it off with \"Announce kills on the overlay\".",
+				"When a boss dies the overlay announces it by name for a few seconds, then goes back to the numbers. It sits at the bottom of the browser source, so the source needs some height below the card or the two overlap.\n\nThe Card size above already allows for that while this is turned on, so a source set to it has the room. Crop tighter by hand and the banner has nowhere to go.\n\nIt uses this panel's accent and text colours. Turn it off with \"Announce kills on the overlay\".",
 			},
 			Help_Step{
 				"How quickly it reacts",
@@ -162,6 +162,10 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 				"Font, size, colour, bold and outline, set once and pushed to all of them. Doing it in OBS means opening eight property dialogs and setting the same thing eight times, and again every time you change your mind.\n\nOnly sent when you change something here, never during play, and only the part you changed: nudging the size doesn't resend the colour. So if you'd rather set one source's colour by hand in OBS, that survives everything except touching Colour on this panel."
 			},
 			Help_Step{
+				"Optionally, the overlay card too",
+				"If your OBS has Browser sources, \"Also send the overlay card\" creates one pointing at the overlay page and keeps it sized to the card, so you never have to type the dimensions in or drag the box out by eye.\n\nThat option only appears when OBS reports a Browser source — on the builds this panel exists for, there's nothing it could create.\n\nIt is resized whenever the card changes, so a size you set by hand won't stick. Untick it to take the source over yourself; it's hidden rather than deleted.",
+			},
+			Help_Step{
 				"Position them in OBS",
 				"That's never touched. New sources are stacked down the left so they don't land on top of each other; move and scale them however you like and the app won't move them again.\n\nUnticking hides a source rather than deleting it, because OBS has no undo for a deleted source.",
 			},
@@ -171,7 +175,7 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 			Help_Step{
 				"If you also have Browser sources",
-				"Then you probably don't want this panel: copying a URL from Overlay card or Single values gives you real alignment, line height and colours. This exists for the builds where that isn't on the menu.",
+				"Then the Overlay card and Single values panels are the better styling story — real alignment, line height and colours. This panel exists for the builds where that isn't on the menu.\n\nIt's still worth connecting for one thing: it can create and size the overlay Browser source for you, which is the step above.",
 			},
 		)
 

@@ -20,6 +20,8 @@ beaten — safe to use with EAC.
 - **Session totals** — bosses and deaths for this sitting
 - **Boss defeated banner** — the overlay names the boss for a few seconds when
   it dies
+- **Self-measuring overlay** — the card reports its own size, so the OBS source
+  can sit tight around it instead of round a box you guessed at
 - Remembers your setup — save file, character, boss list, window size, theme,
   and which tab you were on — between restarts
 - Elden Ring colour theme by default (Dark, Light and follow-the-OS also
@@ -32,7 +34,9 @@ beaten — safe to use with EAC.
   - **Text files** — plain text files for OBS "Text (GDI+/FreeType)" sources
     set to *Read from file*. Works on any OBS version, no browser source
   - **obs-websocket** — creates and updates real OBS text sources, styling and
-    all, for the Linux builds packaged without CEF
+    all, for the Linux builds packaged without CEF. Where your OBS *does* have
+    Browser sources, it can make the overlay one for you and keep it sized to
+    the card
 
 - Mobile companion page for single-monitor players
 
@@ -56,6 +60,7 @@ make build      # build ./er-boss-checklist
 make run        # build and run
 make tar        # release tarball, with libSDL3.so.0 bundled alongside
 make deb        # .deb that depends on the distro's libsdl3-0
+make test       # the app's own tests; Skald's suite is under vendor/skald
 ```
 
 ### Windows
@@ -63,9 +68,12 @@ make deb        # .deb that depends on the distro's libsdl3-0
 From a Developer Command Prompt (MSVC on PATH):
 
 ```cmd
-odin build . -collection:gui=vendor/skald -o:speed -out:er-boss-checklist.exe
+odin build . -collection:gui=vendor/skald -o:speed -subsystem:windows -out:er-boss-checklist.exe
 copy "%ODIN_ROOT%\vendor\sdl3\SDL3.dll" .
 ```
+
+`-subsystem:windows` keeps a console window from opening beside the app. Drop
+it while developing and the startup banner comes back.
 
 Cross-compiling from Linux doesn't work — SDL3 and Vulkan link through MSVC
 import libraries.
@@ -112,7 +120,7 @@ The **OBS** tab has one panel per thing you'd actually add to a scene:
 | **Overlay card** | Everything in one box. One Browser source, one URL. What most people want, and the cheapest — a single browser instance. |
 | **Single values** | A page per value, each its own Browser source, for layouts where the numbers live in different corners. Styled together or one at a time. |
 | **Text files** | Plain files that OBS text sources read. Works on any OBS version, costs nothing, and other tools can read them too. |
-| **obs-websocket** | Connects to OBS and creates real OBS text sources, keeping their text and styling current. For OBS builds that have no Browser source. |
+| **obs-websocket** | Connects to OBS and creates real OBS text sources, keeping their text and styling current. For OBS builds that have no Browser source — and where yours has one, it can create and size the overlay Browser source too. |
 
 ### If your OBS has no Browser source
 
@@ -131,6 +139,11 @@ Options, in order of least effort:
    No alignment, though — `text_ft2_source_v2` hasn't got any, and neither has
    line height. Those two gaps are exactly what the browser-source pages exist
    to fill.
+
+   If your OBS *does* have Browser sources, this panel also offers to create
+   the overlay one and keep it fitted to the card. That option is hidden
+   entirely when OBS reports no Browser source, so it never appears for the
+   builds this panel was written for.
 2. **Text files** — same idea, but you add the sources yourself and point them
    at files.
 3. **The Flatpak or Snap build of OBS**, which bundles CEF and has Browser
@@ -161,6 +174,15 @@ a single browser instance.
 
 The card **fills the browser source**, so the box you drag in OBS is the card
 you see — size the source to the size you want the card.
+
+Once the page has loaded once, the panel shows a **Card size** in pixels. Set
+your Browser source to that and the box sits tight around the card, with no
+dead space to drag out. It's measured by the page itself, so it follows your
+mode, region and text size rather than being a number in the docs. If the
+boss-defeated banner is on, the height already includes room for it.
+
+If you'd rather not type it in, the **obs-websocket** panel can create the
+Browser source for you and keep it at that size as the card changes.
 
 **Card** chooses what's behind the text:
 
@@ -285,9 +307,10 @@ Tarnished's deaths from another's.
 
 **Boss defeated banner** announces the boss by name on the overlay browser
 source for a few seconds, then goes back to the numbers. It sits at the bottom
-of the source, so leave that source some height below the card or the two will
-overlap. It uses the Browser source panel's accent and text colours, and can be
-turned off.
+of the source, so that source needs some height below the card or the two will
+overlap — the **Card size** reading on the Overlay card panel already allows
+for this while the banner is turned on, so a source set to it has room. It uses
+the Browser source panel's accent and text colours, and can be turned off.
 
 Everything here comes from the save file, and the game only writes that every so
 often — so expect a kill to show up within about ten seconds of the fight
@@ -351,7 +374,7 @@ For Seamless Co-op, the file is `ER0000.co2` under the mod's app ID instead of `
 | `settings.odin` | Config-directory settings, with migration from older builds |
 | `server.odin` | Web server for the OBS overlay and mobile page |
 | `obs_text.odin` | Text-file output for OBS text sources |
-| `obs_ws.odin` | obs-websocket v5 client, for driving OBS text sources |
+| `obs_ws.odin` | obs-websocket v5 client, for driving OBS text sources and the overlay Browser source |
 | `src/libs/websocket/` | Minimal RFC 6455 client, for obs-websocket |
 | `src/libs/sbcrypto/` | AES-256-GCM at-rest encryption for the saved password |
 | `widgets.odin` | The single-value pages: which exist, and what each shows |
