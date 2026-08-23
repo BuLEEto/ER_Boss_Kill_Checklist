@@ -183,6 +183,11 @@ zip-win: windows
 	cp -r templates/* $(WIN_DIR)/templates/
 	cp -r static/* $(WIN_DIR)/static/
 	cp README.md LICENSE THIRD_PARTY.md $(WIN_DIR)/
-	@echo "Now copy SDL3.dll from %ODIN_ROOT%\\vendor\\sdl3\\ into $(WIN_DIR)/"
+	@# SDL3.dll used to be a printed reminder, which meant forgetting it
+	@# produced a zip that looked fine and wouldn't start. Find it or stop.
+	@dll="$$(dirname "$$(command -v odin)")/vendor/sdl3/SDL3.dll"; \
+	 if [ -f "$$dll" ]; then cp "$$dll" $(WIN_DIR)/; echo "SDL3.dll from $$dll"; \
+	 elif [ -f SDL3.dll ]; then cp SDL3.dll $(WIN_DIR)/; echo "SDL3.dll from the working directory"; \
+	 else echo "SDL3.dll not found. Copy it from %ODIN_ROOT%\\vendor\\sdl3\\ next to this Makefile and re-run — a zip without it will not start."; exit 1; fi
 	zip -r $(WIN_DIR).zip $(WIN_DIR)/
 	@echo "Built $(WIN_DIR).zip"
