@@ -135,6 +135,14 @@ body.bg-magenta .overlay-header {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
+
+    /* Wrap, or a card narrower than its header loses text. These rows pack
+     * to the right when the card is right-aligned, so anything that doesn't
+     * fit overflows the LEFT edge — off the side of the browser source,
+     * where it can't be scrolled to and simply isn't there. "144 REMAINING"
+     * rendering as "INING" is not a failure anyone can diagnose from the
+     * OBS end. Wrapping costs a line; overflowing costs the information. */
+    flex-wrap: wrap;
 }
 
 .char-name {
@@ -154,24 +162,30 @@ body.bg-magenta .overlay-header {
     font-size: 0.92em;
 }
 
+/* No white-space:nowrap on these.
+ *
+ * They used to carry it, which meant a card narrower than one of these
+ * phrases couldn't break it — and since these rows pack right, the
+ * overflow went off the left edge of the browser source and vanished.
+ * "Session:" rendering as "on:" is worse than a line break ever was.
+ *
+ * The default (normal) only breaks when the line genuinely doesn't fit, so
+ * at any sane width these still read as one piece. */
 .deaths {
     color: var(--red);
     font-size: 0.92em;
     font-weight: bold;
-    white-space: nowrap;
 }
 
 .attempts {
     color: var(--gold);
     font-size: 0.92em;
     font-weight: bold;
-    white-space: nowrap;
 }
 
 .session {
     color: var(--text-dim);
     font-size: 0.85em;
-    white-space: nowrap;
 }
 
 .remaining-label {
@@ -180,7 +194,6 @@ body.bg-magenta .overlay-header {
     text-transform: uppercase;
     letter-spacing: 1px;
     font-weight: bold;
-    white-space: nowrap;
 }
 
 /* Summary mode */
