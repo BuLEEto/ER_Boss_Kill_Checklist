@@ -47,15 +47,22 @@ you're set.
 
 ### Windows
 
-1. Odin on PATH.
-2. Visual Studio Build Tools (MSVC + Windows SDK). Build from the **x64 Native
-   Tools Command Prompt** or a Developer PowerShell, so `cl.exe` and the SDK
-   libraries are on PATH.
+1. Odin. It doesn't have to be on PATH — call `odin.exe` by full path if you
+   prefer.
+2. Visual Studio, or the Build Tools, with the **Desktop development with C++**
+   workload. Odin links through MSVC's `link.exe` and the Windows SDK import
+   libraries.
+
+   **No Developer Command Prompt needed.** Odin discovers the MSVC toolchain
+   itself — `odin build -show-system-calls` prints the `msvc-link` invocation
+   it builds, with the `/LIBPATH` entries for the SDK filled in. An ordinary
+   PowerShell or cmd window works, and `cl.exe` never needs to be on PATH.
 3. Vulkan loader — ships with any recent AMD / NVIDIA / Intel driver. If
    `vulkaninfo` fails, install the [LunarG Vulkan SDK](https://vulkan.lunarg.com/).
 
-`SDL3.dll` comes with Odin at `%ODIN_ROOT%\vendor\sdl3\` — copy it next to the
-`.exe`.
+`SDL3.dll` comes with Odin, at `vendor\sdl3\SDL3.dll` inside the Odin
+directory — copy it next to the `.exe`. `%ODIN_ROOT%` is only set if you set it
+yourself, so use the real path (e.g. `C:\odin\dist\vendor\sdl3\SDL3.dll`).
 
 ## Linux
 
@@ -78,7 +85,7 @@ a dev tree, where no such file exists, the loader just falls through to
 
 ```cmd
 odin build . -collection:gui=vendor/skald -o:speed -subsystem:windows -out:er-boss-checklist.exe
-copy "%ODIN_ROOT%\vendor\sdl3\SDL3.dll" .
+copy C:\odin\dist\vendor\sdl3\SDL3.dll .
 ```
 
 `-subsystem:windows` is what stops a console window opening beside the
@@ -129,6 +136,7 @@ on Linux; update GPU drivers on Windows.
 package, or use the release tarball, which bundles it.
 
 **Link error mentioning `stb_image`** — Odin's stb archives haven't been
-built on this machine. See the Linux prerequisites above; it's a one-off
-`make -C $ODIN_ROOT/vendor/stb/src`. The same applies to `stb_truetype` if you
+built on this machine. See the Linux prerequisites above; it's the one-off
+`make -C "$(dirname "$(command -v odin)")/vendor/stb/src"`. The same applies to
+`stb_truetype` if you
 opt into the legacy text backend with `-define:SKALD_RUNA=false`.

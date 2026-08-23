@@ -65,15 +65,30 @@ make test       # the app's own tests; Skald's suite is under vendor/skald
 
 ### Windows
 
-From a Developer Command Prompt (MSVC on PATH):
+You need Odin, and **Visual Studio or the Build Tools with the "Desktop
+development with C++" workload** — Odin links through MSVC and the Windows SDK
+import libraries.
+
+You do *not* need a Developer Command Prompt, and MSVC does not need to be on
+PATH: Odin locates the toolchain itself. An ordinary PowerShell or cmd window
+in the source directory is enough.
 
 ```cmd
 odin build . -collection:gui=vendor/skald -o:speed -subsystem:windows -out:er-boss-checklist.exe
-copy "%ODIN_ROOT%\vendor\sdl3\SDL3.dll" .
+```
+
+Then copy `SDL3.dll` next to the .exe. It ships with Odin, in `vendor\sdl3\`
+inside your Odin directory — for an install at `C:\odin\dist`:
+
+```cmd
+copy C:\odin\dist\vendor\sdl3\SDL3.dll .
 ```
 
 `-subsystem:windows` keeps a console window from opening beside the app. Drop
 it while developing and the startup banner comes back.
+
+That's the whole build. The released .exe is produced by exactly that command
+from the tagged source, with no other steps.
 
 Cross-compiling from Linux doesn't work — SDL3 and Vulkan link through MSVC
 import libraries.
