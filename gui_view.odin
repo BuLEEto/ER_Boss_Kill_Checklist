@@ -149,6 +149,7 @@ ID_WS_PASS        :: "obs.ws_pass"
 ID_WS_REMEMBER    :: "obs.ws_remember"
 ID_WS_SCENE       :: "obs.ws_scene"
 ID_WS_ROOMY       :: "obs.ws_roomy"
+ID_WS_SEND_OVERLAY :: "obs.ws_send_overlay"
 ID_WS_FONT        :: "obs.ws_font"
 ID_WS_SIZE        :: "obs.ws_size"
 ID_WS_COLOR       :: "obs.ws_color"
@@ -799,6 +800,26 @@ view_obs_browser :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	append(&rows, view_copy_row(ctx, "Overlay URL", overlay_url_string(context.temp_allocator)))
 	append(&rows, view_copy_row(ctx, "Mobile view", mobile_url_string(context.temp_allocator)))
 
+	// What the card actually measures, so the browser source can be sized to
+	// it. The card fills whatever source it's given, so without this the
+	// only way to find the number is to drag the box until it looks right.
+	if w, h, ok := app_overlay_fit_size(app.settings.kill_banner_enabled); ok {
+		append(&rows, view_copy_row(ctx, "Card size", fmt.tprintf("%d x %d", w, h)))
+		hint := "Set the browser source to this and the box will sit tight around the card."
+		if app.settings.kill_banner_enabled {
+			hint = "Set the browser source to this and the box will sit tight around the card, with room under it for the boss-defeated banner."
+		}
+		append(&rows, paragraph(ctx, hint, th.color.fg_muted, th.font.size_xs))
+	} else if running {
+		// Measured by the page itself, so there's nothing to show until one
+		// has been open. Say so rather than leaving a gap where a number
+		// belongs.
+		append(&rows, paragraph(ctx,
+			"Card size — open the overlay URL once and its measurements appear here.",
+			th.color.fg_muted, th.font.size_xs,
+		))
+	}
+
 	return skald.scroll(ctx, {0, 0}, skald.col(
 		..rows[:],
 		spacing     = th.spacing.sm,
@@ -1164,6 +1185,29 @@ view_obs_sources :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		th.color.fg_muted, th.font.size_xs,
 	))
 
+	// The overlay card as a Browser source. Only offered where OBS reports a
+	// browser_source input kind — this whole panel exists for the builds
+	// that have no Browser source at all, and a switch those users could
+	// tick but never see work would be the worst thing on the tab.
+	if obsws_browser_available() {
+		append(&rows, skald.spacer(th.spacing.sm))
+		append(&rows, skald.checkbox(
+			ctx, app.settings.obsws_send_overlay,
+			"Also send the overlay card, as a Browser source",
+			on_obsws_send_overlay, id = skald.hash_id(ID_WS_SEND_OVERLAY),
+		))
+		append(&rows, paragraph(ctx,
+			fmt.tprintf("Creates \"%s\" pointing at the overlay page and keeps it sized to the card, so the source box stays tight around what you can see instead of leaving dead space you have to drag out.", OBS_OVERLAY_SOURCE_NAME),
+			th.color.fg_muted, th.font.size_xs,
+		))
+		if app.settings.obsws_send_overlay {
+			append(&rows, paragraph(ctx,
+				"It's resized whenever the card changes, so a size you set by hand in OBS won't stick. Untick this to take it over yourself.",
+				th.color.warning, th.font.size_xs,
+			))
+		}
+	}
+
 	append(&rows, skald.spacer(th.spacing.sm))
 	for v in view_region_control(ctx, .Obs, "obsws.region") do append(&rows, v)
 	append(&rows, skald.checkbox(
@@ -1478,6 +1522,7 @@ on_obsws_port :: proc(v: string) -> Msg { return Obsws_Port_Draft(v) }
 on_obsws_pass :: proc(v: string) -> Msg { return Obsws_Pass_Draft(v) }
 on_obsws_remember :: proc(v: bool) -> Msg { return Obsws_Remember_Set(v) }
 on_obsws_roomy :: proc(v: bool) -> Msg { return Obsws_Roomy_Set(v) }
+on_obsws_send_overlay :: proc(v: bool) -> Msg { return Obsws_Send_Overlay_Toggled(v) }
 on_obsws_font :: proc(v: string) -> Msg { return Obsws_Font_Set(v) }
 on_obsws_size :: proc(v: f32) -> Msg { return Obsws_Size_Set(int(v + 0.5)) }
 on_obsws_color :: proc(c: skald.Color) -> Msg { return Obsws_Color_Set(color_to_hex(c)) }

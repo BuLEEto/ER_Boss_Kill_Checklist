@@ -39,6 +39,14 @@ KILL_BANNER_SECONDS_MIN     :: 2
 KILL_BANNER_SECONDS_MAX     :: 30
 KILL_BANNER_SECONDS_DEFAULT :: 6
 
+// Where the banner sits, as a fraction of the browser source's height, and
+// the clearance we want between it and the card above. Both mirror
+// static/overlay.css — `.kill-banner { bottom: 6% }` — and exist so a source
+// fitted to the card can still leave the banner somewhere to land. Change
+// one and change the other.
+KILL_BANNER_BOTTOM :: f32(0.06)
+KILL_BANNER_GAP :: 12
+
 POLL_SECONDS_MIN :: 5
 POLL_SECONDS_MAX :: 60
 POLL_SECONDS_DEFAULT :: 5
@@ -59,7 +67,8 @@ POLL_SECONDS_DEFAULT :: 5
 //   9  overlay card panel, hide-cleared, and labels on the value pages
 //  10  obs-websocket back, text sources only, for OBS builds without CEF
 //  11  the obs-websocket text sources get a look of their own
-SETTINGS_VERSION :: 11
+//  12  the overlay card can be sent to OBS as a Browser source
+SETTINGS_VERSION :: 12
 
 // Which region an integration follows. One of these per integration
 // rather than one shared between them: the OBS tab has a panel per
@@ -267,6 +276,16 @@ Settings :: struct {
 	// Widget_Kind. An array rather than eight named bools: the set is the
 	// enum, and a name per entry only invites the two drifting apart.
 	obsws_send: [len(Widget_Kind)]bool `json:"obsws_send"`,
+
+	// Also create and maintain a Browser source pointing at the overlay
+	// page, sized to the card.
+	//
+	// Off by default and hidden entirely unless OBS reports a
+	// browser_source input kind. The rest of this integration exists for
+	// the OBS builds that have no Browser source at all — Debian and
+	// Ubuntu package it without CEF — so offering this unconditionally
+	// would put a button in front of exactly the people it can't work for.
+	obsws_send_overlay: bool `json:"obsws_send_overlay"`,
 
 	// OBS text sources have no line-height setting, so the only way to
 	// open a list up is to send the blank line ourselves.

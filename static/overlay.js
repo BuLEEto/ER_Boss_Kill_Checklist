@@ -101,6 +101,99 @@
     }
 
     // Auto-refresh fallback for OBS Window Capture / old OBS without browser source
+    // -----------------------------------------------------------------------
+    // Size reporting
+    //
+    // The card is width:100%, so it fills whatever browser source it's given
+    // and its own natural size is invisible from outside. That's what leaves
+    // a source box bigger than the card sitting inside it — OBS has no idea
+    // how big the card wanted to be. So measure it and tell the app, which
+    // shows the numbers in the OBS tab and can size a browser source to match.
+    //
+    // The page reloads on every update, so this runs again whenever the
+    // content changes and a fitted source follows along.
+    // -----------------------------------------------------------------------
+
+    function measureNatural() {
+        var card = document.querySelector('.overlay');
+        if (!card) return null;
+
+        // max-content is the width the card would take if nothing constrained
+        // it. Set, measure, put back — the visible card is still meant to
+        // fill the source it ends up in.
+        var prevWidth = card.style.width;
+        var prevMaxWidth = card.style.maxWidth;
+        card.style.width = 'max-content';
+        card.style.maxWidth = 'none';
+        var rect = card.getBoundingClientRect();
+        var size = { w: Math.ceil(rect.width), h: Math.ceil(rect.height) };
+        card.style.width = prevWidth;
+        card.style.maxWidth = prevMaxWidth;
+
+        return (size.w && size.h) ? size : null;
+    }
+
+    // The banner is position:fixed against the bottom of the source, so a
+    // source fitted tightly to the card would print the two on top of each
+    // other. Measure what the banner needs at the card's natural width so the
+    // app can leave room for it rather than guessing.
+    function measureBanner(width) {
+        var probe = document.createElement('div');
+        probe.className = 'kill-banner';
+        probe.style.cssText =
+            'visibility:hidden;animation:none;position:absolute;' +
+            'top:0;bottom:auto;left:0;right:auto;width:' + width + 'px';
+
+        var title = document.createElement('div');
+        title.className = 'kill-banner-title';
+        title.textContent = 'Boss Defeated';
+        probe.appendChild(title);
+
+        // One line's worth. A two-line name makes it taller, but sizing for
+        // the worst case would leave a permanent gap under every card.
+        var name = document.createElement('div');
+        name.className = 'kill-banner-name';
+        name.textContent = 'Boss Name';
+        probe.appendChild(name);
+
+        var rule = document.createElement('div');
+        rule.className = 'kill-banner-rule';
+        rule.style.animation = 'none';
+        probe.appendChild(rule);
+
+        document.body.appendChild(probe);
+        var height = Math.ceil(probe.getBoundingClientRect().height);
+        probe.remove();
+        return height;
+    }
+
+    function reportSize() {
+        var size = measureNatural();
+        if (!size) return;
+
+        fetch('/overlay-size', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                width: size.w,
+                height: size.h,
+                banner_height: measureBanner(size.w)
+            })
+        }).catch(function() {
+            // Opened from a saved copy, or the server has gone away. The
+            // overlay still renders; only the fitting stops working.
+        });
+    }
+
+    // Web fonts change every metric on the page, so measure once they've
+    // settled. Browsers without the API get the plain load event, which is
+    // where they were measuring before fonts.ready existed anyway.
+    if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(reportSize);
+    } else {
+        window.addEventListener('load', reportSize);
+    }
+
     var refreshSec = parseInt(params.get('refresh') || '0', 10);
     if (refreshSec > 0) {
         setInterval(reloadOrDefer, refreshSec * 1000);

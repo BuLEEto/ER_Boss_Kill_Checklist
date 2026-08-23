@@ -15,7 +15,7 @@ ODIN_FLAGS := -collection:gui=vendor/skald
 # makes them survive a restart from a read-only install.
 DATA_FILES := bosses.json hardlock.json eventflag_bst.txt
 
-.PHONY: all build run debug clean install uninstall deb tar windows zip-win sdl3 verify-runpath
+.PHONY: all build run debug test clean install uninstall deb tar windows zip-win sdl3 verify-runpath
 
 all: build
 
@@ -73,8 +73,13 @@ debug:
 run: build
 	./$(APP_NAME)
 
+# The overlay-fit arithmetic, which is the one piece of this that isn't
+# obvious by reading. Skald's own suite lives under vendor/skald.
+test:
+	odin test . $(ODIN_FLAGS) -out:$(APP_NAME)_test
+
 clean:
-	rm -f $(APP_NAME) $(APP_NAME).exe libSDL3.so.0
+	rm -f $(APP_NAME) $(APP_NAME).exe $(APP_NAME)_test libSDL3.so.0
 	rm -rf $(DEB_DIR) $(DEB_DIR).deb $(WIN_DIR) $(WIN_DIR).zip $(TAR_DIR) $(TAR_DIR).tar.gz
 
 # ----------------------------------------------------------------------------

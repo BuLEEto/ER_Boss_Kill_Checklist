@@ -149,6 +149,7 @@ Obsws_Remember_Set :: distinct bool
 Obsws_Connect_Requested :: struct {}
 Obsws_Scene_Selected :: distinct string
 Obsws_Send_Toggled :: struct { kind: Widget_Kind, on: bool }
+Obsws_Send_Overlay_Toggled :: distinct bool
 Obsws_Roomy_Set :: distinct bool
 Obsws_Font_Set :: distinct string
 Obsws_Size_Set :: distinct int
@@ -252,6 +253,7 @@ Msg :: union {
 	Obsws_Connect_Requested,
 	Obsws_Scene_Selected,
 	Obsws_Send_Toggled,
+	Obsws_Send_Overlay_Toggled,
 	Obsws_Roomy_Set,
 	Obsws_Font_Set,
 	Obsws_Size_Set,
@@ -590,6 +592,17 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		if app.settings.obsws_enabled {
 			// Reconnect so a newly ticked source is actually created, and
 			// an unticked one hidden.
+			return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
+		}
+
+	case Obsws_Send_Overlay_Toggled:
+		sync.guard(&app.mu)
+		app.settings.obsws_send_overlay = bool(v)
+		app_save_settings()
+		if app.settings.obsws_enabled {
+			// Same reconnect as the text sources: creating the Browser
+			// source, or hiding it again, is request/response traffic and
+			// the reader thread owns the socket once connected.
 			return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
 		}
 

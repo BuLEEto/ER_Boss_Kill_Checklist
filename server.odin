@@ -1,5 +1,6 @@
 package main
 
+import "core:encoding/json"
 import "core:fmt"
 import "core:strconv"
 import "core:strings"
@@ -70,6 +71,7 @@ server_start :: proc(h: ^Server_Handle, port: int) -> bool {
 	http.router_get(router, "/widget", handle_widget)
 	http.router_get(router, "/events", handle_sse)
 	http.router_get(router, "/api/status", handle_api_status)
+	http.router_post(router, "/overlay-size", handle_overlay_size)
 	srv.router = router
 
 	h.server = srv
@@ -421,6 +423,50 @@ handle_sse :: proc(req: ^http.Request, res: ^http.Response) {
 		}
 	}
 	sync.mutex_unlock(&app.sse_mutex)
+}
+
+// ----------------------------------------------------------------------------
+// POST /overlay-size
+//
+// overlay.js measures the card at its natural width and posts the numbers
+// here after every render. Two things want them: the OBS tab shows the size
+// so a browser source can be typed in by hand, and a source the app manages
+// over obs-websocket is resized to match.
+//
+// Unauthenticated, like the rest of the server, which is fine for what it
+// is — the worst a caller can do is make the OBS tab report a wrong size and
+// resize a source the user asked us to manage. The values are clamped so
+// that stays a cosmetic nuisance rather than a way to drive OBS somewhere
+// silly.
+// ----------------------------------------------------------------------------
+
+OVERLAY_SIZE_MAX :: 4096
+
+handle_overlay_size :: proc(req: ^http.Request, res: ^http.Response) {
+	root, err := json.parse(req.body, allocator = context.temp_allocator)
+	if err != nil {
+		http.response_status(res, .Bad_Request)
+		return
+	}
+
+	width := int(json_int(root, "width"))
+	height := int(json_int(root, "height"))
+	banner := int(json_int(root, "banner_height"))
+
+	// A zero means the page couldn't measure itself — no card in the DOM,
+	// which is what "waiting for save file" looks like. Nothing to record.
+	if width <= 0 || height <= 0 {
+		http.response_status(res, .Bad_Request)
+		return
+	}
+	width = min(width, OVERLAY_SIZE_MAX)
+	height = min(height, OVERLAY_SIZE_MAX)
+	banner = clamp(banner, 0, OVERLAY_SIZE_MAX)
+
+	if app_set_overlay_size(width, height, banner) {
+		obsws_push_overlay_size()
+	}
+	http.response_status(res, .No_Content)
 }
 
 Status_Entry :: struct {

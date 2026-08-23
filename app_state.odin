@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core:math"
 import "core:strings"
 import "core:sync"
 import http "src/libs/http"
@@ -62,9 +63,78 @@ App_State :: struct {
 	// Web server
 	lan_ip:     string,
 	server:     Server_Handle,
+
+	// Natural size of the overlay card, measured by overlay.js and posted
+	// back to /overlay-size. Written by an HTTP worker and read by both the
+	// GUI thread and the obs-websocket push, so it carries its own lock
+	// rather than breaking "app.mu is only ever written from the GUI".
+	overlay_size:    Overlay_Size,
+	overlay_size_mu: sync.Mutex,
+}
+
+// What the overlay card measures at when nothing constrains its width.
+//
+// `banner` is what the boss-defeated banner needs underneath it: the banner
+// is anchored to the bottom of the browser source, so a source fitted to the
+// card alone would draw the two on top of each other.
+Overlay_Size :: struct {
+	width:  int,
+	height: int,
+	banner: int,
+	known:  bool,
 }
 
 app: App_State
+
+// Record a fresh measurement. Reports whether anything actually moved, so
+// callers can skip an OBS round trip when the page has re-rendered at the
+// same size — which is most reloads.
+app_set_overlay_size :: proc(width, height, banner: int) -> (changed: bool) {
+	sync.guard(&app.overlay_size_mu)
+
+	next := Overlay_Size{width = width, height = height, banner = banner, known = true}
+	if app.overlay_size == next do return false
+
+	app.overlay_size = next
+	return true
+}
+
+app_overlay_size :: proc() -> Overlay_Size {
+	sync.guard(&app.overlay_size_mu)
+	return app.overlay_size
+}
+
+// The browser source size that fits the card.
+//
+// With the banner off that's just the card. With it on, the source has to be
+// tall enough that the banner — anchored `KILL_BANNER_BOTTOM` of the way up
+// from the bottom — clears the card underneath it:
+//
+//     card + gap + banner <= height * (1 - KILL_BANNER_BOTTOM)
+//
+// Solving that for height is what the division does.
+//
+// Takes its inputs rather than reading globals so the arithmetic can be
+// tested without two tests racing each other over app.overlay_size.
+overlay_fit_size :: proc(size: Overlay_Size, banner_enabled: bool) -> (width, height: int, ok: bool) {
+	if !size.known do return 0, 0, false
+
+	height = size.height
+	if banner_enabled && size.banner > 0 {
+		// Rounded up: truncating here would quietly hand back a source one
+		// pixel short of the clearance this is supposed to guarantee.
+		needed := int(math.ceil(f32(size.height + size.banner + KILL_BANNER_GAP) / (1 - KILL_BANNER_BOTTOM)))
+		if needed > height do height = needed
+	}
+	return size.width, height, true
+}
+
+// `banner_enabled` is passed in rather than read from app.settings here:
+// this is called from the GUI thread and from an obs-websocket worker, and
+// the two hold different locks when they get here.
+app_overlay_fit_size :: proc(banner_enabled: bool) -> (width, height: int, ok: bool) {
+	return overlay_fit_size(app_overlay_size(), banner_enabled)
+}
 
 // ----------------------------------------------------------------------------
 // Boss list

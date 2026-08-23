@@ -37,6 +37,12 @@ import ws "src/libs/websocket"
 
 OBSWS_SCENE_NONE_LABEL :: "Choose a scene…"
 
+// The Browser source the app creates for the overlay card. Fixed rather
+// than derived from anything, because it is also how the source is found
+// again on the next connect — rename it in OBS and the app will make a
+// new one rather than adopt yours.
+OBS_OVERLAY_SOURCE_NAME :: "ER Boss Overlay"
+
 Obsws_State :: enum {
 	Disconnected,
 	Connecting,
@@ -59,6 +65,20 @@ Obsws :: struct {
 	scene:     string,   // owned; scene new sources get added to
 	scenes:    []string, // owned; every scene OBS reported, for the picker
 	text_kind: string,   // owned; platform's text input kind
+
+	// "browser_source" when this OBS has CEF, empty when it hasn't. The
+	// whole overlay-source feature hangs off this being non-empty, so the
+	// button never appears for the Debian and Ubuntu builds that ship
+	// without a Browser source at all.
+	browser_kind: string, // owned
+
+	// Cached for the resize path, which runs on an HTTP worker when the
+	// overlay page reports a new size. That thread must not touch
+	// app.settings — the GUI thread owns those strings — so everything it
+	// needs is copied here while the connect worker still has it.
+	overlay_url:     string, // owned
+	overlay_managed: bool,
+	overlay_banner:  bool,
 	reader:    ^thread.Thread,
 	next_id:   int,
 }
@@ -68,6 +88,15 @@ g_obs: Obsws
 // ----------------------------------------------------------------------------
 // Status, for the OBS tab
 // ----------------------------------------------------------------------------
+
+// Whether the connected OBS can host the overlay page. The OBS tab hides
+// the option when it can't, rather than offering a switch that silently
+// does nothing.
+obsws_browser_available :: proc() -> bool {
+	sync.mutex_lock(&g_obs.mu)
+	defer sync.mutex_unlock(&g_obs.mu)
+	return len(g_obs.browser_kind) > 0
+}
 
 obsws_status_text :: proc() -> (text: string, kind: Obsws_State) {
 	sync.mutex_lock(&g_obs.mu)
@@ -124,24 +153,34 @@ Obsws_Connect_Params :: struct {
 
 	// Read on the worker too, and cheap to carry.
 	send: [len(Widget_Kind)]bool,
+
+	// The overlay card as a Browser source. `overlay_url` is heap for the
+	// same reason host and scene are: it's built from settings the GUI
+	// thread can free the moment a control moves.
+	send_overlay:   bool,
+	overlay_url:    string,
+	banner_enabled: bool,
 }
 
 // Kick off a connection on a worker thread. Called from `update`, which
 // must not block.
 obsws_connect_command :: proc() -> Obsws_Connect_Params {
 	return Obsws_Connect_Params {
-		host     = strings.clone(app.settings.obsws_host),
-		port     = app.settings.obsws_port,
-		password = strings.clone(app.settings.obsws_password),
-		scene    = strings.clone(app.settings.obsws_scene),
-		look     = Obs_Text_Look {
+		host           = strings.clone(app.settings.obsws_host),
+		port           = app.settings.obsws_port,
+		password       = strings.clone(app.settings.obsws_password),
+		scene          = strings.clone(app.settings.obsws_scene),
+		look           = Obs_Text_Look {
 			font_family = strings.clone(app.settings.obsws_look.font_family),
 			color       = strings.clone(app.settings.obsws_look.color),
 			font_size   = app.settings.obsws_look.font_size,
 			bold        = app.settings.obsws_look.bold,
 			outline     = app.settings.obsws_look.outline,
 		},
-		send     = app.settings.obsws_send,
+		send           = app.settings.obsws_send,
+		send_overlay   = app.settings.obsws_send_overlay,
+		overlay_url    = overlay_url_string(),
+		banner_enabled = app.settings.kill_banner_enabled,
 	}
 }
 
@@ -149,6 +188,7 @@ obsws_connect_worker :: proc(p: Obsws_Connect_Params) -> Msg {
 	defer delete(p.host)
 	defer delete(p.password)
 	defer delete(p.scene)
+	defer delete(p.overlay_url)
 	defer delete(p.look.font_family)
 	defer delete(p.look.color)
 
@@ -393,12 +433,22 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn, p: Obsws_Connect_Params) {
 	// to be confused with the Widget_Kind values looped over below.
 	input_kind := obsws_text_kind(conn)
 
+	// Empty on an OBS without CEF. Everything overlay-source related is
+	// conditional on it, including whether the GUI offers the option.
+	browser_kind := obsws_browser_kind(conn)
+
 	sync.mutex_lock(&g_obs.mu)
 	if len(g_obs.scene) > 0 do delete(g_obs.scene)
 	if len(g_obs.text_kind) > 0 do delete(g_obs.text_kind)
+	if len(g_obs.browser_kind) > 0 do delete(g_obs.browser_kind)
+	if len(g_obs.overlay_url) > 0 do delete(g_obs.overlay_url)
 	obsws_free_scenes()
 	g_obs.scene = strings.clone(scene)
 	g_obs.text_kind = strings.clone(input_kind)
+	g_obs.browser_kind = strings.clone(browser_kind)
+	g_obs.overlay_url = strings.clone(p.overlay_url)
+	g_obs.overlay_managed = p.send_overlay && len(browser_kind) > 0
+	g_obs.overlay_banner = p.banner_enabled
 	g_obs.scenes = make([]string, len(scenes))
 	for n, i in scenes do g_obs.scenes[i] = strings.clone(n)
 	sync.mutex_unlock(&g_obs.mu)
@@ -476,6 +526,107 @@ obsws_prepare_sources :: proc(conn: ^ws.Conn, p: Obsws_Connect_Params) {
 		obsws_place_source(conn, scene, name, 48, y)
 		y += LINE_HEIGHT
 	}
+
+	obsws_prepare_overlay(conn, p, scene, browser_kind, existing, y)
+}
+
+// The overlay card as a Browser source.
+//
+// Kept apart from the text loop above because it is not one of the eight:
+// it points at a page we serve rather than carrying text we push, and it
+// only exists at all where OBS has CEF.
+//
+// Unticked is hide-not-delete, the same bargain the text sources strike —
+// the user may have positioned it, and OBS has no undo for a deleted
+// source.
+@(private = "file")
+obsws_prepare_overlay :: proc(
+	conn: ^ws.Conn,
+	p: Obsws_Connect_Params,
+	scene, browser_kind: string,
+	existing: map[string]bool,
+	y: f32,
+) {
+	if len(browser_kind) == 0 do return
+
+	name := OBS_OVERLAY_SOURCE_NAME
+
+	if !p.send_overlay {
+		if name in existing do obsws_show_source(conn, scene, name, false)
+		return
+	}
+
+	width, height, have_size := app_overlay_fit_size(p.banner_enabled)
+
+	if name in existing {
+		// Already somewhere in OBS. Point it at the current URL and, if
+		// the page has told us how big the card is, fit it — the settings
+		// that shape the URL may well have changed since it was made.
+		obsws_set_overlay_settings(conn, p.overlay_url, width, height, have_size)
+
+		if _, in_scene := obsws_scene_item_id(conn, scene, name); in_scene {
+			obsws_show_source(conn, scene, name, true)
+			return
+		}
+		if obsws_create_scene_item(conn, scene, name) {
+			obsws_place_source(conn, scene, name, 48, y)
+		}
+		return
+	}
+
+	// A first-run source with no measurement yet gets OBS's own defaults
+	// rather than a guess of ours; the page reports its size as soon as it
+	// loads, and the resize lands moments later.
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, `{"sceneName":"`)
+	json_escape_string(&b, scene)
+	strings.write_string(&b, `","inputName":"`)
+	json_escape_string(&b, name)
+	strings.write_string(&b, `","inputKind":"`)
+	json_escape_string(&b, browser_kind)
+	strings.write_string(&b, `","inputSettings":`)
+	obsws_overlay_settings_json(&b, p.overlay_url, width, height, have_size)
+	strings.write_string(&b, `,"sceneItemEnabled":true}`)
+	obsws_request(conn, "CreateInput", strings.to_string(b))
+
+	obsws_place_source(conn, scene, name, 48, y)
+}
+
+// The inputSettings body for the overlay Browser source. `with_size` is
+// false before the page has ever reported a measurement, in which case we
+// send the URL alone and leave the dimensions to OBS.
+@(private = "file")
+obsws_overlay_settings_json :: proc(
+	b: ^strings.Builder,
+	url: string,
+	width, height: int,
+	with_size: bool,
+) {
+	strings.write_string(b, `{"url":"`)
+	json_escape_string(b, url)
+	strings.write_string(b, `"`)
+	if with_size {
+		fmt.sbprintf(b, `,"width":%d,"height":%d`, width, height)
+	}
+	// The page drives its own updates over SSE, so OBS re-rendering it
+	// when the scene becomes active would only throw away a live one.
+	strings.write_string(b, `,"reroute_audio":false,"shutdown":false,"restart_when_active":false}`)
+}
+
+@(private = "file")
+obsws_set_overlay_settings :: proc(
+	conn: ^ws.Conn,
+	url: string,
+	width, height: int,
+	with_size: bool,
+) {
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, `{"inputName":"`)
+	json_escape_string(&b, OBS_OVERLAY_SOURCE_NAME)
+	strings.write_string(&b, `","inputSettings":`)
+	obsws_overlay_settings_json(&b, url, width, height, with_size)
+	strings.write_string(&b, `,"overlay":true}`)
+	obsws_request(conn, "SetInputSettings", strings.to_string(b))
 }
 
 // Add an existing input to a scene as a new scene item. Used when the
@@ -793,6 +944,33 @@ obsws_request_sync :: proc(
 // Pick the platform's text source plugin: text_gdiplus_v3 / _v2 on
 // Windows, text_ft2_source_v2 on Linux. Rather than hardcode a table,
 // ask OBS and take the first text kind it reports.
+// Does this OBS have a Browser source at all?
+//
+// Debian and Ubuntu package OBS without CEF, and there the kind simply
+// isn't in the list. Everything about the overlay source hangs off this, so
+// those users never see a control that couldn't work.
+@(private = "file")
+obsws_browser_kind :: proc(conn: ^ws.Conn) -> string {
+	d, ok := obsws_request_sync(conn, "GetInputKindList")
+	if !ok do return ""
+
+	data := json_object(d, "responseData")
+	obj, is_obj := data.(json.Object)
+	if !is_obj do return ""
+
+	kinds, has := obj["inputKinds"]
+	if !has do return ""
+	arr, is_arr := kinds.(json.Array)
+	if !is_arr do return ""
+
+	for v in arr {
+		str, is_str := v.(json.String)
+		if !is_str do continue
+		if string(str) == "browser_source" do return "browser_source"
+	}
+	return ""
+}
+
 @(private = "file")
 obsws_text_kind :: proc(conn: ^ws.Conn) -> string {
 	d, ok := obsws_request_sync(conn, "GetInputKindList")
@@ -822,6 +1000,32 @@ obsws_text_kind :: proc(conn: ^ws.Conn) -> string {
 // ----------------------------------------------------------------------------
 // Pushing progress
 // ----------------------------------------------------------------------------
+
+// Called from the HTTP worker that took a fresh measurement from the
+// overlay page, to keep a managed Browser source fitted to the card.
+//
+// Touches nothing the GUI thread owns. The URL, the managed flag and the
+// banner setting were all copied onto g_obs by the connect worker precisely
+// so this path never has to read app.settings from another thread.
+obsws_push_overlay_size :: proc() {
+	sync.mutex_lock(&g_obs.send_mu)
+	defer sync.mutex_unlock(&g_obs.send_mu)
+
+	sync.mutex_lock(&g_obs.mu)
+	conn := g_obs.conn
+	connected := g_obs.state == .Connected
+	managed := g_obs.overlay_managed
+	banner := g_obs.overlay_banner
+	url := strings.clone(g_obs.overlay_url, context.temp_allocator)
+	sync.mutex_unlock(&g_obs.mu)
+
+	if !connected || conn == nil || !managed do return
+
+	width, height, ok := app_overlay_fit_size(banner)
+	if !ok do return
+
+	obsws_set_overlay_settings(conn, url, width, height, true)
+}
 
 // Called from the GUI thread after a change. Sends four SetInputSettings
 // requests; if OBS isn't connected this is a no-op.

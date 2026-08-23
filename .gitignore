@@ -1,6 +1,7 @@
 # Build output
 /er-boss-checklist
 /er-boss-checklist.exe
+/er-boss-checklist_test
 /build/
 *.o
 *.obj
