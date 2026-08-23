@@ -1,5 +1,5 @@
 APP_NAME := er-boss-checklist
-VERSION  := 2.1.1
+VERSION  := 2.1.2
 ARCH     := amd64
 
 DEB_DIR := $(APP_NAME)_$(VERSION)_$(ARCH)
