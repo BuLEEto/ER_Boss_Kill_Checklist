@@ -108,4 +108,4 @@ if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
     echo "  * tag it:                   git tag v${NEW_VERSION}"
 fi
 echo "  * build the Windows zip on a Windows machine (see BUILD.md)"
-echo "  * users on Ubuntu 24.04 / Debian 12 want the .tar.gz — it carries SDL3"
+echo "  * both the .deb and the .tar.gz carry SDL3, so neither needs a system one"

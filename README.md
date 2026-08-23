@@ -59,7 +59,7 @@ The GUI framework, [Skald](https://github.com/BuLEEto/Skald), is vendored at
 make build      # build ./er-boss-checklist
 make run        # build and run
 make tar        # release tarball, with libSDL3.so.0 bundled alongside
-make deb        # .deb that depends on the distro's libsdl3-0
+make deb        # .deb with SDL3 bundled — installs anywhere with Vulkan
 make test       # the app's own tests; Skald's suite is under vendor/skald
 ```
 

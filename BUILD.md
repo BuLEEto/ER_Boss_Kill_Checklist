@@ -25,11 +25,11 @@ sudo apt install libsdl3-0 libvulkan1 mesa-vulkan-drivers   # Debian 13+, Devuan
 
 Arch: `sdl3 vulkan-icd-loader`. Fedora 40+: `SDL3 vulkan-loader`.
 
-**Ubuntu 24.04 LTS and Debian 12 have no SDL3 package.** Either build SDL3 from
-source (SDL's `docs/README-linux.md` has the dependency list; `release-3.2.10`
-matches what stable distros ship), or just use the release tarball — `make tar`
-bundles `libSDL3.so.0` next to the binary precisely so those users don't have
-to.
+**Ubuntu 24.04 LTS and Debian 12 have no SDL3 package.** That only affects
+building from source: either build SDL3 yourself (SDL's `docs/README-linux.md`
+has the dependency list; `release-3.2.10` matches what stable distros ship), or
+take a release artifact — both the `.tar.gz` and the `.deb` carry
+`libSDL3.so.0` next to the binary, so neither needs a system SDL3.
 
 Odin ships `vendor:stb` as C source, and Skald loads PNGs through
 `stb_image`, so the static archives have to be built once per machine after
@@ -64,7 +64,7 @@ make build      # ./er-boss-checklist
 make run        # build and run
 make debug      # -debug build; F12 opens Skald's widget inspector
 make tar        # er-boss-checklist_<version>_linux.tar.gz, SDL3 bundled
-make deb        # .deb depending on libsdl3-0 and libvulkan1
+make deb        # .deb with SDL3 bundled; depends only on libvulkan1
 make install    # into /opt/er-boss-checklist (needs root)
 make clean
 ```
