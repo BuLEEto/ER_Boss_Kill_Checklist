@@ -2,9 +2,9 @@
 
 Upstream: <https://github.com/BuLEEto/Skald>
 
-    Commit:  e0673901ee80dae4811656138da5250bbb6b9c1d
-    Date:    2026-08-22 17:26:27 +0100
-    Subject: combobox: keep the popover open when it flips above and overlaps the trigger
+    Commit:  712be373c05baa65f209b8bf52670151568a82b0
+    Date:    2026-08-27 10:36:21 +0100
+    Subject: build: add ./build.sh all example-check guard
 
 Licence: zlib — see `LICENSE`. Bundled-asset and third-party
 acknowledgements are in `NOTICE`.

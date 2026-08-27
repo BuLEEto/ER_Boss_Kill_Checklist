@@ -158,6 +158,18 @@ Widget_State :: struct {
 	// `pressed` is true; when the handle isn't latched this is just
 	// the default 0 and is ignored.
 	drag_donor: int,
+	// marquee_mods latches the modifiers held at a table marquee's press, on
+	// the table's dedicated marquee slot, so the covered-rows stream carries
+	// the press-time intent (not whatever is held mid-drag). Meaningful only
+	// while that slot is `marquee_armed` or `pressed`.
+	marquee_mods: Modifiers,
+	// marquee_armed latches on a press in a table's marquee zone (a row's
+	// whitespace, or the empty body) before the drag has passed the start
+	// threshold. A small-enough release from here is a plain click, not a
+	// box: it selects marquee_row (>=0) or clears the selection (-1, the
+	// empty body). Crossing the threshold clears this and sets `pressed`.
+	marquee_armed: bool,
+	marquee_row:   int,
 	// reveal_marker tracks the last `reveal_row` the table acted on,
 	// stored as row+1 so the zero-value means "nothing revealed yet".
 	// The table scrolls a row into view only when the app's reveal_row
@@ -723,13 +735,13 @@ widget_store_destroy :: proc(ws: ^Widget_Store) {
 // widget_store_frame_reset is called by `run` at the top of each frame so
 // auto-IDs start from zero again and per-frame flags (like wants_text_input)
 // clear. The persistent fields — state map, focused_id — are untouched.
-@(private)
 // Cursor_Shape names the small subset of OS cursor styles Skald
 // widgets need to express. Maps 1:1 onto SDL's SystemCursor catalogue,
 // minus the ones we don't have a use case for yet. Default is the
 // zero value so `Widget_Store.wants_cursor` resets to the regular
 // arrow at the top of each frame without explicit reset code beyond
-// the assignment.
+// the assignment. Exported so canvas authors can store a per-tool
+// cursor in their own state (it's part of the public `canvas` signature).
 Cursor_Shape :: enum {
 	Default,
 	Pointer,        // hand — links, clickable spans
