@@ -481,3 +481,41 @@ widget_preview_of :: proc(template: string) -> string {
 	f := widget_facts(app.settings.ws_region, app.settings.overlay_next_count)
 	return widget_expand(template, f)
 }
+
+// The placeholders that belong to a value, listed first in the editor.
+//
+// Every placeholder resolves in every template — the facts are gathered whole,
+// so "{deaths} deaths, next up {boss}" on one text source works and is a
+// perfectly reasonable thing to want. These are the obvious ones for each
+// value, not the permitted ones; the rest stay available underneath.
+//
+// File scope so the slices can be returned — a slice of a local array would
+// point at a dead stack frame.
+@(private = "file") PH_PROGRESS  := [?]string{"killed", "total", "remaining", "percent"}
+@(private = "file") PH_KILLED    := [?]string{"killed", "total"}
+@(private = "file") PH_TOTAL     := [?]string{"total", "killed"}
+@(private = "file") PH_REMAINING := [?]string{"remaining", "total", "killed"}
+@(private = "file") PH_PERCENT   := [?]string{"percent", "killed", "total"}
+@(private = "file") PH_DEATHS    := [?]string{"deaths"}
+@(private = "file") PH_ATTEMPTS  := [?]string{"attempts", "deaths"}
+@(private = "file") PH_SESSION   := [?]string{"session"}
+@(private = "file") PH_CHARACTER := [?]string{"character", "level"}
+@(private = "file") PH_NEXT      := [?]string{"boss", "place"}
+@(private = "file") PH_REGION    := [?]string{"region", "region_killed", "region_total"}
+
+widget_value_placeholders :: proc(v: Widget_Value) -> []string {
+	switch v {
+	case .Progress:  return PH_PROGRESS[:]
+	case .Killed:    return PH_KILLED[:]
+	case .Total:     return PH_TOTAL[:]
+	case .Remaining: return PH_REMAINING[:]
+	case .Percent:   return PH_PERCENT[:]
+	case .Deaths:    return PH_DEATHS[:]
+	case .Attempts:  return PH_ATTEMPTS[:]
+	case .Session:   return PH_SESSION[:]
+	case .Character: return PH_CHARACTER[:]
+	case .Next:      return PH_NEXT[:]
+	case .Region:    return PH_REGION[:]
+	}
+	return nil
+}

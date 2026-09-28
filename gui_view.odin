@@ -926,7 +926,7 @@ view_obs_widgets :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		on_widget_labels, id = skald.hash_id(ID_WIDGET_LABELS),
 	))
 	append(&rows, paragraph(ctx,
-		"\"DEATHS\" above the number, and so on. Turn it off if you're drawing your own labels in OBS — but a bare number on its own says nothing to a viewer.",
+		"\"DEATHS\" above the number, and so on. Turn it off if you're drawing your own labels in OBS — but a bare number on its own says nothing to a viewer.\n\nThis is a separate line above the value, in its own style, and it only applies to these pages. Putting a word inside the text instead — \"Deaths: {deaths}\" — is a different thing, and reaches the text file and the OBS source too. With both on you get the caption above your own wording.",
 		th.color.fg_muted, th.font.size_xs,
 	))
 
@@ -990,10 +990,19 @@ view_obs_text :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	append(&rows, skald.section_header(ctx, "The files"))
 	files := OBS_TEXT_FILES
 	for f in files {
+		// The three list files have no single template to edit.
+		edit := skald.spacer(0)
+		if value, ok := obs_text_file_value(f.name); ok {
+			label := len(app.settings.widget_templates[int(value)].text) > 0 \
+				? "Text *" : "Text…"
+			edit = skald.button(ctx, label, Msg(Widget_Text_Opened(value)),
+				id = skald.hash_id(fmt.tprintf("textfile.text.%s", f.name)))
+		}
 		append(&rows, skald.row(
 			skald.text(f.name, th.color.fg, th.font.size_sm),
 			skald.flex(1, skald.spacer(0)),
 			skald.text(f.description, th.color.fg_muted, th.font.size_xs),
+			edit,
 			spacing     = th.spacing.sm,
 			padding     = 2,
 			cross_align = .Center,
@@ -1028,6 +1037,29 @@ view_obs_text :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 // served page, the text file and the obs-websocket source. Editing it in one
 // place and having it apply in one place would be the surprise.
 // ---------------------------------------------------------------------------
+
+// Chips in rows of four. Skald has no wrapping container, and a dozen of
+// these on one line runs off the side of the dialog.
+@(private = "file")
+chip_rows :: proc(ctx: ^skald.Ctx(Msg), names: []string) -> []skald.View {
+	CHIPS_PER_ROW :: 4
+	th := ctx.theme
+
+	out := make([dynamic]skald.View, context.temp_allocator)
+	chips := make([dynamic]skald.View, context.temp_allocator)
+
+	for name, i in names {
+		token := fmt.tprintf("{{%s}}", name)
+		append(&chips, skald.button(ctx, token, Msg(Widget_Text_Chip(token)),
+			id = skald.hash_id(fmt.tprintf("widget.text.chip.%s", name))))
+
+		if len(chips) == CHIPS_PER_ROW || i == len(names) - 1 {
+			append(&out, skald.row(..chips[:], spacing = th.spacing.xs))
+			clear(&chips)
+		}
+	}
+	return out[:]
+}
 
 TEXT_DIALOG_WIDTH :: f32(640)
 
@@ -1080,20 +1112,25 @@ view_widget_text_dialog :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		th.color.fg_muted, th.font.size_xs, text_w,
 	))
 
-	// Chips, in rows of four. Skald has no wrapping container, and fourteen
-	// of these on one line runs off the side of the dialog.
-	CHIPS_PER_ROW :: 4
-	chips := make([dynamic]skald.View, context.temp_allocator)
-	names := WIDGET_PLACEHOLDERS
-	for name, i in names {
-		token := fmt.tprintf("{{%s}}", name)
-		append(&chips, skald.button(ctx, token, Msg(Widget_Text_Chip(token)),
-			id = skald.hash_id(fmt.tprintf("widget.text.chip.%s", name))))
+	own := widget_value_placeholders(value)
+	for v in chip_rows(ctx, own) do append(&body, v)
 
-		if len(chips) == CHIPS_PER_ROW || i == len(names) - 1 {
-			append(&body, skald.row(..chips[:], spacing = th.spacing.xs))
-			clear(&chips)
-		}
+	// The rest still work — the facts are gathered whole, so "{deaths} deaths,
+	// next up {boss}" is a perfectly reasonable thing to want on one source.
+	// They are just not what you came here for, so they sit below.
+	others := make([dynamic]string, context.temp_allocator)
+	all := WIDGET_PLACEHOLDERS
+	for name in all {
+		relevant := false
+		for o in own do if o == name { relevant = true; break }
+		if !relevant do append(&others, name)
+	}
+	if len(others) > 0 {
+		append(&body, skald.spacer(th.spacing.xs))
+		append(&body, skald.text(
+			"Anything else, if you want it:", th.color.fg_muted, th.font.size_xs,
+		))
+		for v in chip_rows(ctx, others[:]) do append(&body, v)
 	}
 
 	return skald.dialog(

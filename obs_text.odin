@@ -38,6 +38,27 @@ OBS_TEXT_FILES :: [?]Obs_Text_File {
 	{"regions.txt",      "every region and its count, one per line"},
 }
 
+// The value a text file carries, when it carries a single one.
+//
+// The three list files have no entry: a list needs a template per row rather
+// than one for the whole file.
+obs_text_file_value :: proc(filename: string) -> (Widget_Value, bool) {
+	switch filename {
+	case "progress.txt":  return .Progress, true
+	case "killed.txt":    return .Killed, true
+	case "total.txt":     return .Total, true
+	case "remaining.txt": return .Remaining, true
+	case "percent.txt":   return .Percent, true
+	case "deaths.txt":    return .Deaths, true
+	case "attempts.txt":  return .Attempts, true
+	case "session.txt":   return .Session, true
+	case "character.txt": return .Character, true
+	case "next_boss.txt": return .Next, true
+	case "region.txt":    return .Region, true
+	}
+	return .Progress, false
+}
+
 // Where files go when the user hasn't chosen a folder: an `obs` folder
 // next to settings.json, which is guaranteed writable.
 obs_text_default_dir :: proc(allocator := context.allocator) -> string {
