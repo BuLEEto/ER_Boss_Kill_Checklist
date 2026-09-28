@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core:strings"
 
 // ============================================================================
 // Single-value pages
@@ -242,4 +243,118 @@ widget_facts :: proc(
 	f.all_regions = regions[:]
 
 	return f
+}
+
+// ============================================================================
+// Templates
+//
+// A template is a line of text with {placeholders} in it. The defaults below
+// reproduce what the app has always shown; the point of them is that a user
+// can replace one with "I have rekt {killed} of {total} bosses 💀" and have it
+// reach every surface that value appears on.
+//
+// Substitution is plain text replacement, never fmt. Passing a user-supplied
+// string to fmt.tprintf as its format would let a stray % reinterpret the
+// arguments — and in Odin a stray {} would too, since both are placeholders
+// there. The whole point of this proc is that the input is untrusted.
+//
+// An unknown placeholder is left exactly as typed, braces and all, rather
+// than being blanked or rejected. Blanking makes text silently disappear on
+// stream, which is the worst outcome of the three; rejecting fights someone
+// halfway through typing. Left visible, {kils} is self-evidently a typo the
+// moment the preview renders it.
+//
+// Empty states — "No character", "All bosses defeated" — are deliberately not
+// templated. They aren't a formatting of the facts, they're what gets shown
+// when there are no facts, and every call site already branches on that.
+// ============================================================================
+
+// The default for each value, and between them the list of every placeholder
+// that resolves. Kept as constants rather than scattered literals so the help
+// text and the defaults can't drift apart.
+TPL_PROGRESS  :: "{killed} / {total} bosses"
+TPL_KILLED    :: "{killed}"
+TPL_TOTAL     :: "{total}"
+TPL_REMAINING :: "{remaining}"
+TPL_PERCENT   :: "{percent}%"
+TPL_DEATHS    :: "{deaths}"
+TPL_ATTEMPTS  :: "{attempts}"
+TPL_SESSION   :: "{session}"
+TPL_CHARACTER :: "{character} — RL {level}"
+TPL_NEXT      :: "{boss} — {place}"
+TPL_REGION    :: "{region} ({region_killed}/{region_total})"
+
+// The obs-websocket sources label themselves, because a text source sits on
+// the canvas with no caption to give a bare number meaning.
+TPL_WS_DEATHS   :: "Deaths: {deaths}"
+TPL_WS_ATTEMPTS :: "Attempt {attempts}"
+
+widget_expand :: proc(
+	template: string,
+	f: Widget_Facts,
+	allocator := context.temp_allocator,
+) -> string {
+	b := strings.builder_make(allocator)
+
+	rest := template
+	for {
+		open := strings.index_byte(rest, '{')
+		if open < 0 {
+			strings.write_string(&b, rest)
+			break
+		}
+		strings.write_string(&b, rest[:open])
+
+		close := strings.index_byte(rest[open:], '}')
+		if close < 0 {
+			// Unclosed brace: nothing left to match, so the remainder is
+			// literal text.
+			strings.write_string(&b, rest[open:])
+			break
+		}
+		close += open
+
+		name := rest[open + 1:close]
+		if value, known := widget_placeholder(name, f); known {
+			strings.write_string(&b, value)
+		} else {
+			strings.write_string(&b, rest[open:close + 1])
+		}
+		rest = rest[close + 1:]
+	}
+
+	return strings.to_string(b)
+}
+
+// One placeholder's value. `known` is false for anything not in this list,
+// which is what keeps a typo visible instead of silently empty.
+widget_placeholder :: proc(name: string, f: Widget_Facts) -> (value: string, known: bool) {
+	switch name {
+	case "killed":        return fmt.tprintf("%d", f.killed), true
+	case "total":         return fmt.tprintf("%d", f.total), true
+	case "remaining":     return fmt.tprintf("%d", f.remaining), true
+	case "percent":       return fmt.tprintf("%d", f.percent), true
+	case "deaths":        return fmt.tprintf("%d", f.deaths), true
+	case "attempts":      return fmt.tprintf("%d", f.attempts), true
+	case "session":       return f.session, true
+	case "character":     return f.character_name, true
+	case "level":         return fmt.tprintf("%d", f.character_level), true
+	case "boss":          return f.next_boss, true
+	case "place":         return f.next_place, true
+	case "region":        return f.region_name, true
+	case "region_killed": return fmt.tprintf("%d", f.region_killed), true
+	case "region_total":  return fmt.tprintf("%d", f.region_total), true
+	}
+	return "", false
+}
+
+// Every placeholder name, for the help text and the clickable chips in the
+// editor. Ordered the way someone would look for them rather than
+// alphabetically.
+WIDGET_PLACEHOLDERS :: [?]string {
+	"killed", "total", "remaining", "percent",
+	"deaths", "attempts", "session",
+	"character", "level",
+	"boss", "place",
+	"region", "region_killed", "region_total",
 }

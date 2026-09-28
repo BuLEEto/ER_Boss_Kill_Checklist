@@ -692,26 +692,26 @@ widget_content :: proc(kind: string) -> (label: string, value: string, lines: []
 
 	switch kind {
 	case "killed":
-		return "Defeated", fmt.tprintf("%d", f.killed), nil
+		return "Defeated", widget_expand(TPL_KILLED, f), nil
 	case "total":
-		return "Total", fmt.tprintf("%d", f.total), nil
+		return "Total", widget_expand(TPL_TOTAL, f), nil
 	case "remaining":
-		return "Remaining", fmt.tprintf("%d", f.remaining), nil
+		return "Remaining", widget_expand(TPL_REMAINING, f), nil
 	case "percent":
-		return "Complete", fmt.tprintf("%d%%", f.percent), nil
+		return "Complete", widget_expand(TPL_PERCENT, f), nil
 	case "deaths":
-		return "Deaths", fmt.tprintf("%d", f.deaths), nil
+		return "Deaths", widget_expand(TPL_DEATHS, f), nil
 	case "attempts":
 		if !f.attempts_known do return "Attempts", "—", nil
-		return "Attempts", fmt.tprintf("%d", f.attempts), nil
+		return "Attempts", widget_expand(TPL_ATTEMPTS, f), nil
 	case "session":
-		return "This session", f.session, nil
+		return "This session", widget_expand(TPL_SESSION, f), nil
 	case "character":
 		if !f.has_character do return "Character", "No character", nil
-		return "Character", fmt.tprintf("%s — RL %d", f.character_name, f.character_level), nil
+		return "Character", widget_expand(TPL_CHARACTER, f), nil
 	case "next":
 		if !f.has_next do return "Next", "All bosses defeated", nil
-		return "Next", fmt.tprintf("%s — %s", f.next_boss, f.next_place), nil
+		return "Next", widget_expand(TPL_NEXT, f), nil
 	case "next_list":
 		if len(f.next_list) == 0 {
 			return "Next up", "", single_line("All bosses defeated")
@@ -719,16 +719,14 @@ widget_content :: proc(kind: string) -> (label: string, value: string, lines: []
 		return "Next up", "", f.next_list
 	case "region":
 		if !f.has_region do return "Region", "All regions cleared", nil
-		return "Region", fmt.tprintf(
-			"%s (%d/%d)", f.region_name, f.region_killed, f.region_total,
-		), nil
+		return "Region", widget_expand(TPL_REGION, f), nil
 	case "region_bosses":
 		if len(f.region_bosses) == 0 {
 			return "Remaining here", "", single_line("All regions cleared")
 		}
 		return "Remaining here", "", f.region_bosses
 	case:
-		return "Progress", fmt.tprintf("%d / %d bosses", f.killed, f.total), nil
+		return "Progress", widget_expand(TPL_PROGRESS, f), nil
 	}
 }
 
