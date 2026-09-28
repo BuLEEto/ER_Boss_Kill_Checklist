@@ -64,7 +64,7 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 		append(&steps,
 			Help_Step{
 				"Copy the overlay URL",
-				"Pick the mode and background above, then press Copy next to Overlay URL.",
+				"Pick the mode and background above, then press Copy next to Overlay URL.\n\nPreview beside it opens the real page in your browser — the same one OBS loads, so it can't show you something different. It's also what makes the card measure itself, which is where the Card size below comes from.",
 			},
 			Help_Step{
 				"Add a Browser source in OBS",

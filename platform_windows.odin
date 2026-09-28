@@ -40,3 +40,20 @@ show_fatal_dialog :: proc(message: string) {
 		windows.MB_OK | windows.MB_ICONERROR,
 	)
 }
+
+// Hand a URL to the shell, which is how Windows opens a browser.
+//
+// ShellExecuteW is the one that works for a URL rather than a file; it returns
+// a fake HINSTANCE that is an error code when it's 32 or less, which is an API
+// older than most of the people using it.
+open_url :: proc(url: string) -> bool {
+	res := windows.ShellExecuteW(
+		nil,
+		windows.utf8_to_wstring("open"),
+		windows.utf8_to_wstring(url),
+		nil,
+		nil,
+		windows.SW_SHOWNORMAL,
+	)
+	return uintptr(rawptr(res)) > 32
+}

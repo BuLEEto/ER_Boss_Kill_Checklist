@@ -169,6 +169,8 @@ Obsws_Status_Changed :: struct {
 }
 
 Widget_Style_Opened :: distinct Widget_Kind
+Url_Open_Requested :: distinct string
+Url_Open_Finished :: distinct bool
 Widget_Text_Opened :: distinct Widget_Value
 Widget_Text_Closed :: struct {}
 Widget_Text_Draft :: distinct string
@@ -274,6 +276,8 @@ Msg :: union {
 	Obsws_Look_Reset,
 	Obsws_Status_Changed,
 	Widget_Style_Opened,
+	Url_Open_Requested,
+	Url_Open_Finished,
 	Widget_Text_Opened,
 	Widget_Text_Closed,
 	Widget_Text_Draft,
@@ -719,6 +723,17 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		out.widget_text_open = nil
 		delete(out.widget_text_draft)
 		out.widget_text_draft = strings.clone("")
+
+	case Url_Open_Requested:
+		// On a worker: open_url blocks until the handler is done with it.
+		// The string is cloned because the worker outlives this frame's
+		// temporary memory, and the worker frees it.
+		return out, skald.cmd_thread(Msg, strings.clone(string(v)), open_url_worker)
+
+	case Url_Open_Finished:
+		if !bool(v) {
+			out = gui_toast(out, "Couldn't open a browser — use Copy instead.", .Warning)
+		}
 
 	case Widget_Style_Opened:
 		out.widget_style_open = Widget_Kind(v)
@@ -1313,4 +1328,10 @@ default_browse_location :: proc() -> string {
 
 on_system_theme_changed :: proc(t: skald.System_Theme) -> Msg {
 	return Theme_Selected("system")
+}
+
+// Opening a URL runs off the GUI thread; see open_url in platform_*.odin.
+open_url_worker :: proc(url: string) -> Msg {
+	defer delete(url)
+	return Url_Open_Finished(open_url(url))
 }

@@ -2,6 +2,7 @@
 package main
 
 import "core:fmt"
+import "core:os"
 import "core:sys/linux"
 
 // Work out which local address a phone on the same network should use.
@@ -32,3 +33,21 @@ detect_lan_ip :: proc() -> string {
 // Linux builds keep their console, so fatal() has already said its piece
 // on stderr by the time we get here.
 show_fatal_dialog :: proc(message: string) {}
+
+// Hand a URL to whatever the desktop opens links with.
+//
+// Blocking on purpose, and therefore called from a worker rather than the GUI
+// thread: xdg-open can sit there until the browser is up, and there is no way
+// to release a process handle in core:os without waiting for it. Waiting on a
+// worker costs nothing; waiting on the GUI thread would freeze the window
+// during the one action whose whole point is that it happens elsewhere.
+open_url :: proc(url: string) -> bool {
+	state, stdout, stderr, err := os.process_exec(
+		os.Process_Desc{command = {"xdg-open", url}},
+		context.allocator,
+	)
+	defer delete(stdout)
+	defer delete(stderr)
+
+	return err == nil && state.success
+}

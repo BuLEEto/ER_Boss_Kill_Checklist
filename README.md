@@ -192,6 +192,12 @@ a single browser instance.
 The card **fills the browser source**, so the box you drag in OBS is the card
 you see — size the source to the size you want the card.
 
+**Preview** opens the page in your browser — the real one OBS loads, not a
+mock-up, so what you see is what it shows. The only difference is that OBS
+composites it over gameplay rather than onto a blank page. It's also the
+easiest way to make the card measure itself, which is what fills in the size
+below.
+
 Once the page has loaded once, the panel shows a **Card size** in pixels. Set
 your Browser source to that and the box sits tight around the card, with no
 dead space to drag out. It's measured by the page itself, so it follows your

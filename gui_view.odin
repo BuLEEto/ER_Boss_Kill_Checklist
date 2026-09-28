@@ -795,11 +795,11 @@ view_obs_browser :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 
 	append(&rows, skald.spacer(th.spacing.sm))
 	append(&rows, paragraph(ctx,
-		"Sources → + → Browser in OBS, then paste this into the URL field.",
+		"Sources → + → Browser in OBS, then paste this into the URL field. Preview opens the real page in your browser — the same one OBS loads, so what you see is what it shows, except that OBS composites it over gameplay rather than onto a blank page.",
 		th.color.fg_muted, th.font.size_xs,
 	))
-	append(&rows, view_copy_row(ctx, "Overlay URL", overlay_url_string(context.temp_allocator)))
-	append(&rows, view_copy_row(ctx, "Mobile view", mobile_url_string(context.temp_allocator)))
+	append(&rows, view_copy_row(ctx, "Overlay URL", overlay_url_string(context.temp_allocator), "Preview"))
+	append(&rows, view_copy_row(ctx, "Mobile view", mobile_url_string(context.temp_allocator), "Open"))
 
 	// What the card actually measures, so the browser source can be sized to
 	// it. The card fills whatever source it's given, so without this the
@@ -1188,7 +1188,7 @@ view_widget_style_dialog :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	// unambiguous which page it belongs to, and it keeps eight rows of
 	// near-identical text off the panel.
 	append(&body, view_copy_row(
-		ctx, "URL", widget_url_string(kind, context.temp_allocator),
+		ctx, "URL", widget_url_string(kind, context.temp_allocator), "Preview",
 	))
 	append(&body, skald.spacer(th.spacing.sm))
 
@@ -1455,12 +1455,27 @@ view_obs_sources :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	))
 }
 
-view_copy_row :: proc(ctx: ^skald.Ctx(Msg), label, value: string) -> skald.View {
+// `open_label` adds a button that hands the value to the desktop's browser.
+// Empty for anything that isn't a URL — the Card size row shares this layout
+// and there is nothing there to open.
+view_copy_row :: proc(
+	ctx: ^skald.Ctx(Msg),
+	label, value: string,
+	open_label := "",
+) -> skald.View {
 	th := ctx.theme
+
+	open_button := skald.spacer(0)
+	if len(open_label) > 0 {
+		open_button = skald.button(ctx, open_label, Msg(Url_Open_Requested(value)),
+			id = skald.hash_id(fmt.tprintf("url.open.%s", label)))
+	}
+
 	return skald.form_row(ctx, label,
 		skald.row(
 			skald.flex(1, skald.text_selectable(ctx, value, th.color.fg, th.font.size_sm), min_main = 200),
 			skald.button(ctx, "Copy", Msg(Copy_Requested(value))),
+			open_button,
 			spacing     = th.spacing.sm,
 			cross_align = .Center,
 		),
