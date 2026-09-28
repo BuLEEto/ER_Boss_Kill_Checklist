@@ -22,6 +22,8 @@ beaten — safe to use with EAC.
   it dies
 - **Self-measuring overlay** — the card reports its own size, so the OBS source
   can sit tight around it instead of round a box you guessed at
+- **Your own wording** — "I have rekt {killed} of {total} bosses!" instead of
+  "12 / 207 bosses", on any value, with a live preview
 - Remembers your setup — save file, character, boss list, window size, theme,
   and which tab you were on — between restarts
 - Elden Ring colour theme by default (Dark, Light and follow-the-OS also
@@ -218,8 +220,8 @@ source — if the bottom of your summary is cut off, this is the fix.
 ### Single values
 
 A page per value — progress, attempts, next boss, deaths, session, character,
-region, region bosses — listed as a table with **Copy URL** and **Style…** on
-each row. Each goes into OBS as its own Browser source, for layouts where the
+region, region bosses — listed as a table with **Copy URL**, **Text…** and
+**Style…** on each row. Each goes into OBS as its own Browser source, for layouts where the
 numbers live in different corners rather than gathered in a card. Add only the
 ones you'll use; each is a browser instance.
 
@@ -231,6 +233,36 @@ far bigger than its text is what makes these awkward to position.
 **Caption above each value** is on by default: "DEATHS" above the number, and so
 on. A bare `57` on a stream tells a viewer nothing. Turn it off if you're drawing
 your own labels in OBS.
+
+#### Your own wording
+
+**Text…** on a row opens an editor. The value itself goes in as a placeholder
+and everything around it is yours:
+
+```
+I have rekt {killed} of {total} bosses! 💀
+```
+
+The placeholders are `{killed}` `{total}` `{remaining}` `{percent}` `{deaths}`
+`{attempts}` `{session}` `{character}` `{level}` `{boss}` `{place}` `{region}`
+`{region_killed}` `{region_total}`. All of them work in any value, so a deaths
+source can read `{deaths} deaths, next up {boss}` if that's what you want — the
+ones that belong to the value you're editing are just listed first. Click one
+to insert it rather than typing the braces.
+
+The editor previews the result against your actual save, so you see it before
+it reaches a stream. Anything in braces that isn't a placeholder is left exactly
+as typed, so a typo shows up in the preview rather than silently disappearing.
+Leave the box empty for the built-in wording.
+
+**The wording is shared.** The same value on its page, in its text file and on
+an obs-websocket source all read the same — change Deaths once and `deaths.txt`
+changes with it. That's also why it's separate from **Caption above each value**,
+which is a separate line in its own style and only applies to these pages; with
+both on you get the caption above your own wording.
+
+Lists have no editor — Region bosses and the "one per line" files need a wording
+per row rather than one for the whole thing, which isn't built yet.
 
 The URLs carry nothing but the page's type, and are shown in each page's
 **Style…** dialog rather than in the list — eight of them differing only in the
@@ -351,6 +383,12 @@ works on every OBS version:
 | `region.txt` | first unfinished region and its count |
 | `region_bosses.txt` | what's left in that region, one per line |
 | `regions.txt` | every region and its count, one per line |
+
+Each single-value file has a **Text…** button beside it for
+[your own wording](#your-own-wording) — the same editor as on the Single values
+panel, and the same text, so changing one changes both. The four number-only
+files are only reachable from here; they have no row on Single values. The three
+"one per line" files have no button, because a list needs a wording per row.
 
 ### Mobile companion
 

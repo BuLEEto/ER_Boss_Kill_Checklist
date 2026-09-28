@@ -130,6 +130,14 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 				"OBS text sources have no line-height setting, in either the GDI+ or FreeType flavour. The only way to open a list up is to send a blank line between entries — that's the \"Blank line between entries\" tick box under obs-websocket, and it applies to these files too.",
 			},
 			Help_Step{
+				"Change the wording, if you want to",
+				"Text… on any row opens an editor. The value goes in as a placeholder — {killed}, {deaths}, {boss} and so on — and everything around it is yours: \"I have rekt {killed} of {total} bosses!\", emoji included.\n\nThe preview under the box shows it against your actual save, so you can see it before it goes anywhere near a stream. Click a placeholder to add it rather than typing the braces. Anything in braces that isn't a placeholder is left exactly as typed, so a mistake shows up in the preview instead of quietly vanishing.\n\nEmpty means the built-in wording, and Reset puts it back.",
+			},
+			Help_Step{
+				"One wording, everywhere that value appears",
+				"The text you set is shared: the same value on the page, in the text file and on an obs-websocket source all read the same. Change Deaths here and deaths.txt changes with it.\n\nLists are the exception — Region bosses and the \"one per line\" files have no editor, because a list needs a wording per row rather than one for the whole thing.",
+			},
+			Help_Step{
 				"Repeat for anything else you want",
 				"One source per file. Most people show progress.txt and deaths.txt, and add next_boss.txt if they want a \"coming up\" line.",
 			},
@@ -192,6 +200,14 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			Help_Step{
 				"Leave the background transparent",
 				"The pages have no background of their own, so they composite straight over gameplay.",
+			},
+			Help_Step{
+				"Change the wording, if you want to",
+				"Text… on any row opens an editor. The value goes in as a placeholder — {killed}, {deaths}, {boss} and so on — and everything around it is yours: \"I have rekt {killed} of {total} bosses!\", emoji included.\n\nThe preview under the box shows it against your actual save, so you can see it before it goes anywhere near a stream. Click a placeholder to add it rather than typing the braces. Anything in braces that isn't a placeholder is left exactly as typed, so a mistake shows up in the preview instead of quietly vanishing.\n\nEmpty means the built-in wording, and Reset puts it back.",
+			},
+			Help_Step{
+				"One wording, everywhere that value appears",
+				"The text you set is shared: the same value on the page, in the text file and on an obs-websocket source all read the same. Change Deaths here and deaths.txt changes with it.\n\nLists are the exception — Region bosses and the \"one per line\" files have no editor, because a list needs a wording per row rather than one for the whole thing.",
 			},
 			Help_Step{
 				"Position each one",
