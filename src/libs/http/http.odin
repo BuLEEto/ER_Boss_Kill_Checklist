@@ -4201,12 +4201,19 @@ serve_static_file :: proc(res: ^Response, path: string, root_dir: string = ".") 
 	ext := filepath.ext(clean_path)
 	res.headers["Content-Type"] = mime_type(ext)
 
-	// Cache static assets — CSS, JS, images, fonts
-	lower_ext := strings.to_lower(ext, context.temp_allocator)
-	switch lower_ext {
-	case ".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2", ".ttf", ".eot":
-		res.headers["Cache-Control"] = "public, max-age=86400"
-	}
+	// LOCAL PATCH (see VENDORED.md): no caching of static assets.
+	//
+	// Upstream sends "public, max-age=86400", which is right for a public web
+	// server and wrong for this one. The only client that matters here is
+	// OBS's embedded browser, which keeps a disk cache across restarts — so a
+	// day-old stylesheet outlives an app upgrade and the overlay renders
+	// against CSS that no longer matches its HTML. The user sees a broken
+	// overlay and has no reason to suspect a cache.
+	//
+	// Everything served here is a few KB over loopback, so there is nothing
+	// to gain by caching it in the first place.
+	res.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+	res.headers["Pragma"] = "no-cache"
 
 	append(&res.body, ..content)
 	return .None

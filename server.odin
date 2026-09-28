@@ -63,6 +63,7 @@ server_start :: proc(h: ^Server_Handle, port: int) -> bool {
 
 	router := http.router_create()
 	http.router_use(router, http.cors_allow_all)
+	http.router_use(router, no_store)
 	http.server_static(srv, "static", "/static/")
 
 	http.router_get(router, "/", handle_root)
@@ -151,6 +152,26 @@ server_clear_error :: proc(h: ^Server_Handle) {
 // ----------------------------------------------------------------------------
 // Handlers
 // ----------------------------------------------------------------------------
+
+// Tell every client not to cache anything we serve.
+//
+// OBS's browser source keeps a CEF disk cache that survives restarts, so a
+// stale page or stylesheet outlives an app upgrade and the overlay comes back
+// wrong — or blank. The only remedy from the OBS side is "Refresh cache of
+// current page" in the source properties, which people have no reason to know
+// about; the reports we get are "it just stopped working".
+//
+// Nothing here is worth caching anyway. It's loopback, the pages are a few KB,
+// and every one of them is meant to be live.
+//
+// Only covers the router's own routes — /static/ is served before the
+// middleware chain runs, so that side is handled in the HTTP library itself.
+// See src/libs/http/VENDORED.md.
+no_store :: proc(req: ^http.Request, res: ^http.Response) -> bool {
+	http.response_header(res, "Cache-Control", "no-store, no-cache, must-revalidate")
+	http.response_header(res, "Pragma", "no-cache")
+	return true
+}
 
 // Nothing lives at the root any more — the config UI it used to serve is
 // the desktop window. Send visitors to the page they almost certainly
