@@ -9,6 +9,235 @@ must be flagged in a `### Breaking changes` section per release.
 Source-compatible additions (new procs, new defaulted parameters,
 new optional features) live under `### Added` / `### Changed`.
 
+## 1.3.5 — 2026-09-26
+
+### Fixed
+
+- **A default-ignorable no longer becomes a `.notdef` box on a font with no
+  space glyph.** Ignorables (variation selectors, ZWJ, soft hyphen, …) were
+  blanked by substituting the font's space glyph at zero advance — but an emoji
+  font typically ships no space glyph, so `❤️` (U+2764 U+FE0F) drew the emoji
+  followed by a box (the VS16 routes to the emoji fallback). When the run's font
+  has no space glyph the ignorable is now dropped outright (HarfBuzz's
+  `REMOVE_DEFAULT_IGNORABLES`); fonts that have one are unchanged. Regressions:
+  `test_default_ignorable_dropped_when_no_space_glyph`,
+  `test_emoji_variation_selector_no_notdef_box`.
+
+## 1.3.4 — 2026-09-23
+
+### Fixed
+
+- **A ligature no longer shifts every later glyph's cluster by one.** After a
+  ligature substitution the parallel cluster / ignorable arrays were re-synced
+  by truncating from the right, but the deletion happens in the *middle* of the
+  buffer — so every glyph past a ligature named the previous codepoint. Line
+  breaking landed mid-word, and control-byte detection mislabelled (a `\n` drawn
+  as a box, the next character dropped). GSUB now records each deletion and the
+  shaper replays it, keeping clusters exact — nested (type-6 → type-4) routes
+  included. Also realigns the `ignorable` array (default-ignorable zero-advance).
+  Regression: `test_ligature_keeps_later_clusters`.
+
+## 1.3.3 — 2026-09-22
+
+### Fixed
+
+- **Varied glyphs no longer keep the default instance's bounding box.**
+  `glyf_outline_var` copied the glyph header's box (the default instance) and
+  never recomputed it after applying gvar deltas — so a heavier variable-weight
+  glyph (Inter grows rightward with weight) was clipped on the right at raster
+  time, and fed stale x-height / cap-height to the hinter. The box is now
+  recomputed from the varied points. Regression:
+  `test_varied_glyph_bbox_tracks_points`.
+
+## 1.3.2 — 2026-09-18
+
+### Fixed
+
+- **Variable CFF2 fonts no longer drop whole glyphs.** The charstring operand
+  stack was 48 (Type 2's limit); CFF2 allows 513, because one `blend` carries a
+  glyph's coordinates *and* their per-region deltas at once, so a font with a
+  couple of regions exceeds 48 on ordinary letters. Past 48 the stack silently
+  dropped operands and the glyph came back `.Invalid_Table` — missing, no error
+  (Cantarell's `i j o O Q 0 6 9`; ~20 glyphs in Source Code VF). The stack is now
+  513 and an overflow refuses the glyph rather than drawing it short. Resolves
+  the CFF2 gap noted under 1.2.4. Regression:
+  `test_cff2_no_missing_glyphs_from_operand_stack`.
+- **CFF flex operators are drawn.** `flex` / `hflex` / `hflex1` / `flex1`
+  (two-byte `12 34`–`37`) were skipped, silently dropping the shallow stem
+  curves; they now emit their cubics.
+
+## 1.3.1 — 2026-09-13
+
+### Changed
+
+- **The Thai word-break dictionary is now opt-in — behaviour change.** It used
+  to compile into every binary and build its trie (~60 MB transient) on the
+  first wrapped paragraph of *any* app, Thai or not, and it embedded the
+  CC-BY-SA PyThaiNLP corpus into every consumer's binary. It's now **off by
+  default**: build `-define:RUNA_THAI_DICT=true` for dictionary word-breaking
+  (and then honour the corpus's CC-BY-SA attribution + share-alike). Without
+  it, Thai falls back to grapheme-cluster breaks — no corpus in the binary, no
+  startup cost. When enabled, the trie now also builds lazily, only once Thai
+  text actually appears.
+
+## 1.3.0 — 2026-09-12
+
+### Added
+
+- **Per-call OpenType feature control.** `Paragraph_Opts` / `Shape_Run_Opts`
+  gain `disable_features: bit_set[Feature]`, and `shape_text` /
+  `shape_text_cached` a defaulted `disable_features` param. `Feature` covers
+  the discretionary features — `Ligatures` (liga), `Contextual_Ligatures`
+  (clig), `Contextual_Alternates` (calt); the mandatory ccmp/locl/rlig are
+  always applied and can't be switched off. `{}` = unchanged behaviour. Main
+  use is turning ligatures off in a code editor. The set feeds layout and
+  measurement, and the shape cache keys on it, so widths match what's drawn.
+
+## 1.2.4 — 2026-09-08
+
+### Fixed
+
+- **Variable composite glyphs no longer vanish off the default instance.**
+  `font_glyph_outline` flattened a composite (e.g. Inter's `i`, `j`, `,`)
+  and then applied its gvar deltas to the flattened points — but a
+  composite's deltas move its *component offsets* (+4 phantoms), not the
+  points, so the counts mismatched and every composite returned
+  `.Invalid_Table` at any non-default axis. Outlines are now varied while
+  parsing: a simple glyph gets its own point deltas, a composite varies
+  each component's placement and recurses. Regression:
+  `test_variable_composite_glyph_outline`.
+
+- **Implemented IUP (interpolation of untouched points).** Tuples carrying
+  a sparse point list previously moved only their explicit points, subtly
+  distorting glyphs that rely on the spec's inferred-delta interpolation
+  for the rest of each contour. Untouched points now interpolate from
+  their nearest touched neighbours along the contour.
+
+### Known gaps surfaced while fixing the above
+
+- **CFF2 outlines fail for some glyphs even at the default instance.**
+  ~20 glyphs in Source Code VF return `.Invalid_Table` from
+  `font_glyph_outline` with no axis set — a CFF2 charstring parse gap, not
+  a variation bug (the gvar fix above is glyf-only). Repro: sweep
+  `font_glyph_outline` over `tests/fonts/SourceCodeVF.otf`; the failures
+  are identical at the default instance and at wght=600.
+- **COLR layers are not varied.** `raster/color.odin` / `color_brush.odin`
+  render COLR base-glyph layers through the static `glyf_outline`, so a
+  variable COLR font's layers stay at their default instance. (COLRv1
+  varies its paints via an ItemVariationStore — a separate path from gvar.)
+
+## 1.2.3 — 2026-07-25
+
+### Fixed
+
+- **A single combining mark severed Arabic cursive joining.** Any harakat
+  broke the chain, so all vocalised Arabic rendered as disconnected
+  isolated forms — `بَب` shaped to three isolated BEHs.
+
+  `ArabicShaping.txt` omits `Joining_Type=T` characters by design,
+  defining them as the unlisted Mn/Me/Cf codepoints. runa returned its
+  non-joining sentinel for everything unlisted, which the state machine
+  treats as chain-breaking. `joining_type` now derives the Transparent
+  set from General_Category, still consulting the explicit listing first
+  — ZWJ and ZWNJ are both `Cf` but listed `C` / `U`.
+
+  `بب`, `بَب`, `بَبَب` and `مُحَمَّد` now match HarfBuzz glyph-for-glyph.
+  `test_transparent_table_matches_ucd` sweeps the whole codepoint space
+  against the vendored UCD so a bad table regeneration cannot pass
+  silently.
+
+- **Default-ignorables no longer paint.** U+061C ARABIC LETTER MARK
+  rendered as a visible 0.6 em glyph mid-word; LRM / RLM / soft hyphen /
+  variation selectors were likewise drawn. They now emit a zero-advance
+  space, matching HarfBuzz, while still doing their job in the joining
+  and bidi passes — ZWNJ continues to break the cursive chain.
+  Regression: `test_default_ignorables_do_not_paint`.
+
+### Known gaps
+
+- **Ligatures do not skip marks.** `لَا` still fails to form the lam-alef
+  ligature: HarfBuzz `[291, 704]`, runa `[47, 291, 667]`. GSUB matching is
+  adjacency-only and never consults `Lookup_Info.flag`, so
+  `LOOKUP_FLAG_IGNORE_MARKS` is ignored and the fatha blocks the match.
+  Needs a GDEF parser. The joining fix is a prerequisite for this, not a
+  substitute.
+- **`shape_run` does not normalize.** Quranic Arabic depends on it
+  (ALEF + MADDAH), and it also shows up in Hebrew nikud: `שָׁלוֹם` shapes
+  with two combining marks in the opposite order to HarfBuzz
+  (`… 100 79 96` vs `… 79 100 96`) because the canonical reordering
+  pass is missing. The `normalize` package implements NFC/NFD/NFKC/NFKD
+  at 100 % conformance; the shaper just does not call it.
+- **Malayalam diverges from HarfBuzz on common words** — `കാര്യം`
+  (*kāryaṃ*) shapes to `[23 64 148 49 6]` against HarfBuzz's
+  `[23 64 50 160 6]`. Devanagari NGA conjuncts (`कङ्क`) likewise. Common
+  Devanagari is unaffected (`नमस्ते`, `हिन्दी` match). README's script
+  table now states this rather than claiming byte-for-byte parity across
+  all 13 scripts.
+
+## 1.2.2 — 2026-07-25
+
+### Fixed
+
+- **Indic reph reordering corrupted glyph order before punctuation.** A
+  Devanagari word ending in RA + VIRAMA followed by any non-Indic
+  character — space, comma, digit, Latin letter, or the danda `।` —
+  emitted that character *ahead of* the syllable: `कर् क` shaped to
+  `[ka, space, reph, ka]`. Bengali, Kannada, Gujarati and Odia share the
+  code path.
+
+  When a reph leads a syllable with no base after it, `identify_base`
+  fell back to an index pointing past the syllable, at the next
+  syllable's first glyph, which `reorder_reph` then rotated into the
+  cluster. Same defect as the 1.2.1 crash — that fix guarded the crash
+  site, which only fires when the index runs off the whole buffer, so
+  with a following character it corrupted silently instead of panicking.
+
+  1.2.2 fixes the root, and recognises an independent vowel as a base
+  candidate: the OpenType vowel-based syllable `[Ra H] V …` is
+  spec-sanctioned, so `र्अ` must keep emitting the reph after its vowel.
+
+### Known gaps surfaced while fixing the above
+
+Pre-existing, none introduced by this release:
+
+- ~~Arabic combining marks resolve to `Joining_Type=X`, so a single fatha
+  severs cursive joining: vocalised Arabic renders disconnected.~~
+  **Fixed in 1.2.3.**
+- `rphf` is applied buffer-wide with no positional gate, so runa forms a
+  reph where HarfBuzz declines to (no base present). The 1.2.2 tests pin
+  the *ordering*, which HarfBuzz agrees with, not this composition.
+- Cluster indices desync after ligation (`resize` truncates from the
+  right; GSUB removes from the middle), so glyphs after a ligature report
+  an earlier byte offset.
+- The Indic v1-script-tag retry fires whenever a v2 feature matched
+  nothing, applying v1-only lookups to fonts that ship v2.
+- GPOS mark attachment omits the base's `hmtx` advance; `abvm` / `blwm` /
+  `dist` are never applied; `Lookup_Info.flag` is ignored.
+- Cursive joining is gated on `script == "arab"`, so Syriac never gets
+  init / medi / fina.
+
+## 1.2.1 — 2026-05-26
+
+### Fixed
+
+- **Indic shaper out-of-bounds crash on a lone reph.** A Devanagari
+  cluster ending in RA + Virama with no following base consonant (e.g.
+  `र्`) made `reorder_reph` compute `base_idx == len` and index past the
+  glyph buffer — a panic, and a denial-of-service vector for anything
+  shaping untrusted text. The reorder now bails when the reph has no
+  base consonant. Regression: `test_devanagari_lone_reph`.
+
+- **Glyph-bitmap allocation is now bounded.** `raster_glyph` accepted any
+  positive size, and the bitmap dimensions (`bbox × size`) were unbounded —
+  so a pathological size, or a malicious font with an absurd glyph bbox,
+  could drive an enormous allocation (OOM). `raster_glyph` now rejects
+  non-finite / non-positive / absurd sizes, and bitmap allocation refuses
+  dimensions past `RASTER_MAX_DIM` (4096) for both alpha and COLR paths.
+  Regression: `test_bitmap_make_dimension_cap`.
+
+Both found by fuzzing the engine (font parse + shape + raster) under
+AddressSanitizer / MemorySanitizer.
+
 ## 1.2.0 — 2026-05-22
 
 Headline: **`runa.Cache` is now bounded.** v1.x shipped an unbounded

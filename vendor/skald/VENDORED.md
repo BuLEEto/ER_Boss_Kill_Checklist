@@ -2,9 +2,9 @@
 
 Upstream: <https://github.com/BuLEEto/Skald>
 
-    Commit:  712be373c05baa65f209b8bf52670151568a82b0
-    Date:    2026-08-27 10:36:21 +0100
-    Subject: build: add ./build.sh all example-check guard
+    Commit:  ce186fd84d44accd98431545b62a39a13003dde8
+    Date:    2026-09-26 14:16:45 +0100
+    Subject: runa: refresh vendor to 1.3.5 — default-ignorable .notdef box fix
 
 Licence: zlib — see `LICENSE`. Bundled-asset and third-party
 acknowledgements are in `NOTICE`.

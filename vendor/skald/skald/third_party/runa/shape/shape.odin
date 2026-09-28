@@ -53,16 +53,48 @@ Shape_Inputs :: struct {
 	units_per_em: u16,
 }
 
+// Feature is a discretionary GSUB feature a caller may switch off per call.
+// The mandatory features (ccmp, locl, rlig) are always applied and are not
+// representable here — they are correctness, not preference.
+Feature :: enum u8 {
+	Ligatures,             // liga
+	Contextual_Ligatures,  // clig
+	Contextual_Alternates, // calt (code-font -> == != … ligatures fire here)
+}
+
 // Shape_Run_Opts is the per-call options.
 Shape_Run_Opts :: struct {
 	script:   parse.Tag,                       // e.g. parse.LATN_SCRIPT
 	language: parse.Tag,                       // e.g. parse.DFLT_LANG
-	// Add per-call feature overrides if/when the API matures.
+	// Discretionary features to switch off this call; {} = all applied.
+	// Changes glyph advances, so shape and measure with the same set.
+	disable_features: bit_set[Feature],
 }
 
 @(private)
 axis_values_non_default :: proc(values: []f32) -> bool {
 	for v in values { if v != 0 { return true } }
+	return false
+}
+
+// is_default_ignorable reports Unicode Default_Ignorable_Code_Point —
+// LRM / RLM / ALM, ZWJ / ZWNJ, variation selectors, and friends. These
+// carry meaning for bidi and joining but must not paint: HarfBuzz emits
+// them as a zero-advance space, and without that U+061C ARABIC LETTER
+// MARK rendered as a visible 0.6 em glyph in the middle of Arabic text.
+//
+// 17 ranges from Unicode 17.0 `tools/ucd/DerivedCoreProperties.txt`
+// (property `Default_Ignorable_Code_Point`).
+@(private)
+is_default_ignorable :: proc(r: rune) -> bool {
+	switch r {
+	case 0x00AD, 0x034F, 0x061C, 0x115F..=0x1160,
+	     0x17B4..=0x17B5, 0x180B..=0x180F, 0x200B..=0x200F, 0x202A..=0x202E,
+	     0x2060..=0x206F, 0x3164, 0xFE00..=0xFE0F, 0xFEFF,
+	     0xFFA0, 0xFFF0..=0xFFF8, 0x1BCA0..=0x1BCA3, 0x1D173..=0x1D17A,
+	     0xE0000..=0xE0FFF:
+		return true
+	}
 	return false
 }
 
@@ -80,12 +112,19 @@ shape_run :: proc(in_: ^Shape_Inputs, opts: Shape_Run_Opts, text: string, size: 
 	clusters := make([dynamic]u32,            0, len(text), context.temp_allocator)
 	runes    := make([dynamic]rune,           0, len(text), context.temp_allocator)
 
+	// Parallel to `gids`: marks the positions that came from a
+	// Default_Ignorable codepoint, so stage 5 can blank them. Tracked
+	// here because this is the only point where the rune → glyph mapping
+	// is exactly 1:1; it follows `clusters` through the GSUB resizes.
+	ignorable := make([dynamic]bool, 0, len(text), context.temp_allocator)
+
 	byte_idx: u32 = 0
 	for r in text {
 		gid := parse.cmap_lookup(in_.cmap, r)
 		append(&gids, gid)
 		append(&clusters, byte_idx)
 		append(&runes, r)
+		append(&ignorable, is_default_ignorable(r))
 
 		// Advance byte index by the UTF-8 length of the codepoint we
 		// just consumed.
@@ -123,38 +162,37 @@ shape_run :: proc(in_: ^Shape_Inputs, opts: Shape_Run_Opts, text: string, size: 
 	// stage below then composes any remaining ligatures on top.
 	if in_.gsub != nil && is_indic_script(opts.script) {
 		indic_shape(in_.gsub, &gids, &clusters, runes[:], opts.script, opts.language)
+		resize(&ignorable, len(gids))
 	}
 
 	// Stage 2: GSUB. Apply v0.1 features in the canonical order. The
 	// cluster array is rewritten in parallel as ligatures collapse
 	// glyphs.
 	if in_.gsub != nil {
-		gsub_features := [?]parse.Tag{
-			parse.tag("ccmp"),
-			parse.tag("locl"),
-			parse.tag("rlig"),
-			parse.tag("liga"),
-			parse.tag("clig"),
-			parse.tag("calt"),
+		// ccmp / locl / rlig are mandatory (correctness); liga / clig /
+		// calt are discretionary and honour `opts.disable_features`.
+		Stage :: struct { tag: parse.Tag, opt: Maybe(Feature) }
+		gsub_features := [?]Stage{
+			{parse.tag("ccmp"), nil},
+			{parse.tag("locl"), nil},
+			{parse.tag("rlig"), nil},
+			{parse.tag("liga"), .Ligatures},
+			{parse.tag("clig"), .Contextual_Ligatures},
+			{parse.tag("calt"), .Contextual_Alternates},
 		}
-		for ft in gsub_features {
-			before := len(gids)
-			parse.gsub_apply_feature(in_.gsub, &gids, opts.script, opts.language, ft)
-			after := len(gids)
-			if before == after { continue }
-			// Walk in parallel and drop cluster entries whose gid index
-			// no longer exists. Since GSUB rewrites gids in place with
-			// `ordered_remove(gids, j)` for the trailing inputs of a
-			// ligation, the simplest re-sync is to truncate `clusters`
-			// to `after` from the right — but that loses correctness if
-			// non-leading positions collapsed. Walk and pull the leftmost
-			// surviving cluster for each gid.
-			//
-			// For v0.1, the imprecision: if a ligation happened we keep
-			// the cluster of the first surviving codepoint. Good enough
-			// for left-to-right Latin text where ligation always
-			// preserves the leftmost cluster.
-			resize(&clusters, after)
+		removed := make([dynamic]int, 0, 8, context.temp_allocator)
+		for st in gsub_features {
+			if f, ok := st.opt.?; ok && f in opts.disable_features { continue }
+			clear(&removed)
+			parse.gsub_apply_feature(in_.gsub, &gids, opts.script, opts.language, st.tag, &removed)
+			// Replay the exact glyph deletions gsub made onto the parallel
+			// arrays, in the same order, so a ligature keeps every later
+			// glyph's cluster correct. (Truncating from the right instead
+			// slid every cluster past the ligature by one.)
+			for idx in removed {
+				if idx < len(clusters)  { ordered_remove(&clusters, idx) }
+				if idx < len(ignorable) { ordered_remove(&ignorable, idx) }
+			}
 		}
 	}
 
@@ -185,8 +223,30 @@ shape_run :: proc(in_: ^Shape_Inputs, opts: Shape_Run_Opts, text: string, size: 
 		cluster: u32 = 0
 		if i < len(clusters) { cluster = clusters[i] }
 
+		// Default-ignorables (LRM / RLM / ALM, ZWJ / ZWNJ, variation
+		// selectors) have already done their job in the joining and bidi
+		// passes and must not paint. Emit the font's space glyph at zero
+		// advance where it has one (HarfBuzz's default — keeps the glyph
+		// and its cluster in the run). Where the font ships no space glyph
+		// — many emoji fonts don't, and a variation selector routes to the
+		// emoji font — that lookup returns .notdef, which WOULD draw a box,
+		// so drop the glyph entirely instead (HarfBuzz's
+		// REMOVE_DEFAULT_IGNORABLES). Dropping paints nothing, adds no
+		// width (the advance was already zero), and leaves the surviving
+		// glyphs' clusters untouched, so the codepoint's bytes stay
+		// attributed to the preceding grapheme.
+		gid := gids[i]
+		if i < len(ignorable) && ignorable[i] {
+			space := parse.cmap_lookup(in_.cmap, ' ')
+			if space == 0 { continue }
+			gid = space
+			advance_units = 0
+			x_off_units   = 0
+			y_off_units   = 0
+		}
+
 		append(out, Shaped_Glyph{
-			glyph_id  = gids[i],
+			glyph_id  = gid,
 			cluster   = cluster,
 			x_advance = advance_units * scale,
 			y_advance = f32(adjusts[i].y_advance) * scale,
