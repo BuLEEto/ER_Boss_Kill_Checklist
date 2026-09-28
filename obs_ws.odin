@@ -1027,6 +1027,42 @@ obsws_push_overlay_size :: proc() {
 	obsws_set_overlay_settings(conn, url, width, height, true)
 }
 
+// What one obs-websocket text source shows.
+//
+// Self-labelling, unlike the served pages: a text source stands alone on the
+// canvas with no caption above it, so "Deaths: 57" has to carry its own word
+// or it is a number with no meaning. That is the one place the three OBS
+// surfaces deliberately disagree, which is why presentation stayed here
+// rather than moving into widget_facts.
+//
+// Pure, so it can be tested without a socket or a live OBS.
+obsws_source_text :: proc(kind: Widget_Kind, f: Widget_Facts, roomy: bool) -> string {
+	switch kind {
+	case .Progress:
+		return fmt.tprintf("%d / %d bosses", f.killed, f.total)
+	case .Next_Boss:
+		if !f.has_next do return "All bosses defeated"
+		return fmt.tprintf("%s — %s", f.next_boss, f.next_place)
+	case .Deaths:
+		return fmt.tprintf("Deaths: %d", f.deaths)
+	case .Character:
+		if !f.has_character do return "No character"
+		return fmt.tprintf("%s — RL %d", f.character_name, f.character_level)
+	case .Region:
+		if !f.has_region do return "All regions cleared"
+		return fmt.tprintf("%s (%d/%d)", f.region_name, f.region_killed, f.region_total)
+	case .Region_Bosses:
+		if !f.has_region do return "All regions cleared"
+		return obs_join_lines(f.region_bosses, roomy)
+	case .Attempts:
+		if !f.attempts_known do return "Attempt —"
+		return fmt.tprintf("Attempt %d", f.attempts)
+	case .Session:
+		return f.session
+	}
+	return ""
+}
+
 // Called from the GUI thread after a change. Sends four SetInputSettings
 // requests; if OBS isn't connected this is a no-op.
 obsws_push_update :: proc() {
@@ -1040,56 +1076,14 @@ obsws_push_update :: proc() {
 
 	if !connected || conn == nil do return
 
-	total, killed := count_bosses(app.regions)
-	name, level := app_active_character()
-
-	next := app_next_bosses(1, context.temp_allocator)
-	next_text := len(next) > 0 \
-		? fmt.tprintf("%s — %s", next[0].boss, next[0].place) \
-		: "All bosses defeated"
-
-	character := len(name) > 0 ? fmt.tprintf("%s — RL %d", name, level) : "No character"
-
-	attempts_text := "Attempt —"
-	if n, ok := app_attempts(); ok {
-		attempts_text = fmt.tprintf("Attempt %d", n)
-	}
-	session_text := session_summary()
-
-	region_text := "All regions cleared"
-	region_bosses := "All regions cleared"
-	if idx := app_focus_region(app.settings.obsws_region); idx >= 0 {
-		r := &app.regions[idx]
-		r_total, r_killed := count_region_bosses(r)
-		region_text = fmt.tprintf("%s (%d/%d)", r.region_name, r_killed, r_total)
-
-		names := make([dynamic]string, context.temp_allocator)
-		for &boss in r.bosses {
-			if boss.killed do continue
-			append(&names, boss.boss)
-		}
-		region_bosses = obs_join_lines(names[:], app.settings.obsws_roomy_lines)
-	}
+	f := widget_facts(app.settings.obsws_region, 1)
 
 	// Built per kind so Widget_Kind stays the single source of truth for
 	// what each source shows.
 	for kind in Widget_Kind {
 		if !obsws_sends(kind) do continue
 
-		// Self-labelling, unlike the served pages. A text source stands
-		// alone on the canvas with no caption above it, so "Deaths: 57"
-		// has to carry its own word or it's a number with no meaning.
-		value: string
-		switch kind {
-		case .Progress:      value = fmt.tprintf("%d / %d bosses", killed, total)
-		case .Next_Boss:     value = next_text
-		case .Deaths:        value = fmt.tprintf("Deaths: %d", app.death_count)
-		case .Character:     value = character
-		case .Region:        value = region_text
-		case .Region_Bosses: value = region_bosses
-		case .Attempts:      value = attempts_text
-		case .Session:       value = session_text
-		}
+		value := obsws_source_text(kind, f, app.settings.obsws_roomy_lines)
 
 		b := strings.builder_make(context.temp_allocator)
 		strings.write_string(&b, `{"inputName":"`)

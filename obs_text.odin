@@ -63,68 +63,46 @@ obs_text_write_all :: proc() -> os.Error {
 		return mk
 	}
 
-	total, killed := count_bosses(app.regions)
-	remaining := total - killed
-	percent := total > 0 ? killed * 100 / total : 0
-	name, level := app_active_character()
+	f := widget_facts(app.settings.text_region, app.settings.overlay_next_count)
 
 	character := "No character"
-	if len(name) > 0 {
-		character = fmt.tprintf("%s — RL %d", name, level)
+	if f.has_character {
+		character = fmt.tprintf("%s — RL %d", f.character_name, f.character_level)
 	}
 
 	attempts_text := "—"
-	if n, ok := app_attempts(); ok {
-		attempts_text = fmt.tprintf("%d", n)
+	if f.attempts_known {
+		attempts_text = fmt.tprintf("%d", f.attempts)
 	}
-	session_text := session_summary()
-
-	next := app_next_bosses(app.settings.overlay_next_count, context.temp_allocator)
 
 	next_one := "All bosses defeated"
-	if len(next) > 0 {
-		next_one = fmt.tprintf("%s — %s", next[0].boss, next[0].place)
+	if f.has_next {
+		next_one = fmt.tprintf("%s — %s", f.next_boss, f.next_place)
 	}
-
-	next_lines := make([dynamic]string, context.temp_allocator)
-	for b in next {
-		append(&next_lines, fmt.tprintf("%s — %s", b.boss, b.place))
-	}
-	next_many := len(next) > 0 ? obs_join_lines(next_lines[:], app.settings.text_roomy_lines) : "All bosses defeated"
+	next_many := len(f.next_list) > 0 \
+		? obs_join_lines(f.next_list, app.settings.text_roomy_lines) \
+		: "All bosses defeated"
 
 	region := "All regions cleared"
 	region_bosses := "All regions cleared"
-	if idx := app_focus_region(app.settings.text_region); idx >= 0 {
-		r := &app.regions[idx]
-		r_total, r_killed := count_region_bosses(r)
-		region = fmt.tprintf("%s (%d/%d)", r.region_name, r_killed, r_total)
-
-		rb := make([dynamic]string, context.temp_allocator)
-		for &boss in r.bosses {
-			if boss.killed do continue
-			append(&rb, boss.boss)
-		}
-		region_bosses = obs_join_lines(rb[:], app.settings.text_roomy_lines)
+	if f.has_region {
+		region = fmt.tprintf("%s (%d/%d)", f.region_name, f.region_killed, f.region_total)
+		region_bosses = obs_join_lines(f.region_bosses, app.settings.text_roomy_lines)
 	}
 
 	// Every region, in order, the way the overlay's summary mode lists
 	// them — so a text source can show the same breakdown.
-	region_lines := make([dynamic]string, context.temp_allocator)
-	for &r in app.regions {
-		r_total, r_killed := count_region_bosses(&r)
-		append(&region_lines, fmt.tprintf("%s %d/%d", r.region_name, r_killed, r_total))
-	}
-	all_regions := obs_join_lines(region_lines[:], app.settings.text_roomy_lines)
+	all_regions := obs_join_lines(f.all_regions, app.settings.text_roomy_lines)
 
 	contents := [?]string {
-		fmt.tprintf("%d / %d bosses", killed, total),
-		fmt.tprintf("%d", killed),
-		fmt.tprintf("%d", total),
-		fmt.tprintf("%d", remaining),
-		fmt.tprintf("%d%%", percent),
-		fmt.tprintf("%d", app.death_count),
+		fmt.tprintf("%d / %d bosses", f.killed, f.total),
+		fmt.tprintf("%d", f.killed),
+		fmt.tprintf("%d", f.total),
+		fmt.tprintf("%d", f.remaining),
+		fmt.tprintf("%d%%", f.percent),
+		fmt.tprintf("%d", f.deaths),
 		attempts_text,
-		session_text,
+		f.session,
 		character,
 		next_one,
 		next_many,

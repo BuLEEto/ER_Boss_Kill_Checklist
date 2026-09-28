@@ -677,60 +677,58 @@ handle_widget :: proc(req: ^http.Request, res: ^http.Response) {
 }
 
 // The label, single value and (for lists) lines for one widget type.
+// A one-line list. The empty-state text differs per value ("All bosses
+// defeated" vs "All regions cleared"), so it stays at the call site rather
+// than moving into widget_facts.
+@(private = "file")
+single_line :: proc(text: string) -> []string {
+	out := make([]string, 1, context.temp_allocator)
+	out[0] = text
+	return out
+}
+
 widget_content :: proc(kind: string) -> (label: string, value: string, lines: []string) {
-	total, killed := count_bosses(app.regions)
-	name, level := app_active_character()
+	f := widget_facts(app.settings.ws_region, app.settings.overlay_next_count)
 
 	switch kind {
 	case "killed":
-		return "Defeated", fmt.tprintf("%d", killed), nil
+		return "Defeated", fmt.tprintf("%d", f.killed), nil
 	case "total":
-		return "Total", fmt.tprintf("%d", total), nil
+		return "Total", fmt.tprintf("%d", f.total), nil
 	case "remaining":
-		return "Remaining", fmt.tprintf("%d", total - killed), nil
+		return "Remaining", fmt.tprintf("%d", f.remaining), nil
 	case "percent":
-		pct := total > 0 ? killed * 100 / total : 0
-		return "Complete", fmt.tprintf("%d%%", pct), nil
+		return "Complete", fmt.tprintf("%d%%", f.percent), nil
 	case "deaths":
-		return "Deaths", fmt.tprintf("%d", app.death_count), nil
+		return "Deaths", fmt.tprintf("%d", f.deaths), nil
 	case "attempts":
-		n, ok := app_attempts()
-		if !ok do return "Attempts", "—", nil
-		return "Attempts", fmt.tprintf("%d", n), nil
+		if !f.attempts_known do return "Attempts", "—", nil
+		return "Attempts", fmt.tprintf("%d", f.attempts), nil
 	case "session":
-		return "This session", session_summary(), nil
+		return "This session", f.session, nil
 	case "character":
-		if len(name) == 0 do return "Character", "No character", nil
-		return "Character", fmt.tprintf("%s — RL %d", name, level), nil
+		if !f.has_character do return "Character", "No character", nil
+		return "Character", fmt.tprintf("%s — RL %d", f.character_name, f.character_level), nil
 	case "next":
-		next := app_next_bosses(1, context.temp_allocator)
-		if len(next) == 0 do return "Next", "All bosses defeated", nil
-		return "Next", fmt.tprintf("%s — %s", next[0].boss, next[0].place), nil
+		if !f.has_next do return "Next", "All bosses defeated", nil
+		return "Next", fmt.tprintf("%s — %s", f.next_boss, f.next_place), nil
 	case "next_list":
-		next := app_next_bosses(app.settings.overlay_next_count, context.temp_allocator)
-		out := make([dynamic]string, context.temp_allocator)
-		for b in next do append(&out, fmt.tprintf("%s — %s", b.boss, b.place))
-		if len(out) == 0 do append(&out, "All bosses defeated")
-		return "Next up", "", out[:]
+		if len(f.next_list) == 0 {
+			return "Next up", "", single_line("All bosses defeated")
+		}
+		return "Next up", "", f.next_list
 	case "region":
-		idx := app_focus_region(app.settings.ws_region)
-		if idx < 0 do return "Region", "All regions cleared", nil
-		r_total, r_killed := count_region_bosses(&app.regions[idx])
+		if !f.has_region do return "Region", "All regions cleared", nil
 		return "Region", fmt.tprintf(
-			"%s (%d/%d)", app.regions[idx].region_name, r_killed, r_total,
+			"%s (%d/%d)", f.region_name, f.region_killed, f.region_total,
 		), nil
 	case "region_bosses":
-		idx := app_focus_region(app.settings.ws_region)
-		out := make([dynamic]string, context.temp_allocator)
-		if idx >= 0 {
-			for &b in app.regions[idx].bosses {
-				if !b.killed do append(&out, b.boss)
-			}
+		if len(f.region_bosses) == 0 {
+			return "Remaining here", "", single_line("All regions cleared")
 		}
-		if len(out) == 0 do append(&out, "All regions cleared")
-		return "Remaining here", "", out[:]
+		return "Remaining here", "", f.region_bosses
 	case:
-		return "Progress", fmt.tprintf("%d / %d bosses", killed, total), nil
+		return "Progress", fmt.tprintf("%d / %d bosses", f.killed, f.total), nil
 	}
 }
 

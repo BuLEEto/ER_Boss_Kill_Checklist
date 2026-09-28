@@ -138,3 +138,108 @@ widget_kind_from_slug :: proc(slug: string) -> (Widget_Kind, bool) {
 	}
 	return .Progress, false
 }
+
+// ============================================================================
+// Facts
+//
+// Every value the OBS surfaces can show, gathered once.
+//
+// The three of them — the served /widget pages, the text files, and the
+// obs-websocket text sources — each used to build these independently. Three
+// copies of "%d / %d bosses" kept in step by hand, and they had already
+// drifted: the websocket sources label themselves ("Deaths: 57") because an
+// OBS text source has no caption of its own to sit under.
+//
+// Facts here; presentation stays at the call site, because that difference is
+// real and deliberate rather than an accident to be normalised away.
+//
+// `region` and `next_count` are parameters rather than reads of app.settings,
+// because each surface genuinely has its own: ws_region, text_region and
+// obsws_region are three separate controls, and a change to one is not meant
+// to move the others.
+//
+// Read-only over app state, so callers hold whatever lock they already held.
+// ============================================================================
+
+Widget_Facts :: struct {
+	killed, total, remaining, percent: int,
+
+	deaths: u32,
+
+	// Absent until the first kill of the session gives it a bookmark.
+	attempts:       int,
+	attempts_known: bool,
+
+	character_name:  string,
+	character_level: u32,
+	has_character:   bool,
+
+	session: string,
+
+	// The next boss still standing, then the next few.
+	next_boss:  string,
+	next_place: string,
+	has_next:   bool,
+	next_list:  []string, // "Boss — Place", up to next_count of them
+
+	// The focused region for this surface, and what is left in it.
+	region_name:   string,
+	region_killed: int,
+	region_total:  int,
+	has_region:    bool,
+	region_bosses: []string, // boss names, not yet killed
+
+	// Every region in list order, as "Name k/t".
+	all_regions: []string,
+}
+
+widget_facts :: proc(
+	region: Region_Choice,
+	next_count: int,
+	allocator := context.temp_allocator,
+) -> (f: Widget_Facts) {
+	f.total, f.killed = count_bosses(app.regions)
+	f.remaining = f.total - f.killed
+	f.percent = f.total > 0 ? f.killed * 100 / f.total : 0
+
+	f.deaths = app.death_count
+	f.attempts, f.attempts_known = app_attempts()
+	f.session = session_summary()
+
+	name, level := app_active_character()
+	f.character_name = name
+	f.character_level = level
+	f.has_character = len(name) > 0
+
+	next := app_next_bosses(next_count, allocator)
+	if len(next) > 0 {
+		f.next_boss = next[0].boss
+		f.next_place = next[0].place
+		f.has_next = true
+	}
+	list := make([dynamic]string, allocator)
+	for b in next do append(&list, fmt.tprintf("%s — %s", b.boss, b.place))
+	f.next_list = list[:]
+
+	if idx := app_focus_region(region); idx >= 0 {
+		r := &app.regions[idx]
+		f.region_name = r.region_name
+		f.region_total, f.region_killed = count_region_bosses(r)
+		f.has_region = true
+
+		left := make([dynamic]string, allocator)
+		for &b in r.bosses {
+			if !b.killed do append(&left, b.boss)
+		}
+		f.region_bosses = left[:]
+	}
+
+	regions := make([dynamic]string, allocator)
+	for &r in app.regions {
+		r_total, r_killed := count_region_bosses(&r)
+		append(&regions, fmt.tprintf("%s %d/%d", r.region_name, r_killed, r_total))
+	}
+	f.all_regions = regions[:]
+
+	return f
+}
