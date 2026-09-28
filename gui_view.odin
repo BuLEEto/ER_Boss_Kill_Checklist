@@ -41,6 +41,7 @@ gui_view :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		// Both return an empty spacer when closed, so they cost nothing here.
 		view_save_dialog(s, ctx),
 		view_widget_style_dialog(s, ctx),
+		view_widget_text_dialog(s, ctx),
 		view_help_dialog(s, ctx),
 		skald.toast(
 			ctx,
@@ -888,6 +889,18 @@ view_obs_widgets :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 			badge = skald.text("Custom", th.color.primary, th.font.size_xs)
 		}
 
+			// Region bosses is a list, so there's no single line to edit.
+			text_button := skald.spacer(0)
+			if value, ok := widget_value_for_kind(kind); ok {
+				// ASCII asterisk deliberately: U+270E renders as a .notdef box
+				// in Inter, and the modified-marker convention reads clearly
+				// enough without reaching for a glyph the font may not have.
+				label := len(app.settings.widget_templates[int(value)].text) > 0 \
+					? "Text *" : "Text…"
+				text_button = skald.button(ctx, label, Msg(Widget_Text_Opened(value)),
+					id = skald.hash_id(fmt.tprintf("widget.text.%s", widget_slug(kind))))
+			}
+
 		append(&rows, skald.row(
 			skald.col(
 				skald.text(widget_label(kind), th.color.fg, th.font.size_sm),
@@ -900,6 +913,7 @@ view_obs_widgets :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 			skald.button(ctx, "Copy URL",
 				Msg(Copy_Requested(widget_url_string(kind, context.temp_allocator))),
 				id = skald.hash_id(fmt.tprintf("widget.copy.%s", widget_slug(kind)))),
+			text_button,
 			skald.button(ctx, "Style…", Msg(Widget_Style_Opened(kind)),
 				id = skald.hash_id(fmt.tprintf("widget.style.%s", widget_slug(kind)))),
 			spacing     = th.spacing.sm,
@@ -1006,6 +1020,115 @@ view_obs_text :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 // needs a third "not set" state, and "why didn't that one change?" is a
 // worse question than "this page is styled on its own".
 // ----------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Custom text
+//
+// One template per value, shared by every surface that value appears on — the
+// served page, the text file and the obs-websocket source. Editing it in one
+// place and having it apply in one place would be the surprise.
+// ---------------------------------------------------------------------------
+
+TEXT_DIALOG_WIDTH :: f32(640)
+
+view_widget_text_dialog :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
+	th := ctx.theme
+
+	value, open := s.widget_text_open.?
+	if !open {
+		// Built even when closed, so the dialog keeps its dismiss animation.
+		return skald.dialog(
+			ctx, open = false, on_dismiss = on_widget_text_closed,
+			content = skald.spacer(0),
+		)
+	}
+
+	// Same arithmetic view_help_dialog uses. Without an explicit width,
+	// paragraph() falls back to the width of a scrolling tab body — the
+	// window, not the dialog — and every wrapped line runs off the side.
+	text_w := TEXT_DIALOG_WIDTH - 2 * th.spacing.lg - 2 * SCROLL_GUTTER - SCROLL_GUTTER
+
+	fallback := widget_default_template(value)
+	using_default := len(strings.trim_space(s.widget_text_draft)) == 0
+	effective := using_default ? fallback : s.widget_text_draft
+
+	body := make([dynamic]skald.View, context.temp_allocator)
+
+	append(&body, skald.text_input(
+		ctx, s.widget_text_draft, on_widget_text_draft,
+		placeholder = fallback,
+		id = skald.hash_id("widget.text.field"),
+	))
+	append(&body, paragraph(ctx,
+		using_default \
+			? fmt.tprintf("Empty, so this uses the built-in wording: %s", fallback) \
+			: "Leave it empty to go back to the built-in wording.",
+		th.color.fg_muted, th.font.size_xs, text_w,
+	))
+
+	// The preview is the point of the dialog. A typo'd placeholder shows up
+	// here as literal braces, which is the whole reason unknown ones aren't
+	// silently blanked.
+	append(&body, skald.spacer(th.spacing.sm))
+	append(&body, skald.section_header(ctx, "Preview"))
+	append(&body, skald.text(widget_preview_of(effective), th.color.fg, th.font.size_md))
+
+	append(&body, skald.spacer(th.spacing.sm))
+	append(&body, skald.section_header(ctx, "Values you can use"))
+	append(&body, paragraph(ctx,
+		"Click one to add it. Anything else in braces is left alone, so a typo shows up in the preview rather than quietly disappearing on stream.",
+		th.color.fg_muted, th.font.size_xs, text_w,
+	))
+
+	// Chips, in rows of four. Skald has no wrapping container, and fourteen
+	// of these on one line runs off the side of the dialog.
+	CHIPS_PER_ROW :: 4
+	chips := make([dynamic]skald.View, context.temp_allocator)
+	names := WIDGET_PLACEHOLDERS
+	for name, i in names {
+		token := fmt.tprintf("{{%s}}", name)
+		append(&chips, skald.button(ctx, token, Msg(Widget_Text_Chip(token)),
+			id = skald.hash_id(fmt.tprintf("widget.text.chip.%s", name))))
+
+		if len(chips) == CHIPS_PER_ROW || i == len(names) - 1 {
+			append(&body, skald.row(..chips[:], spacing = th.spacing.xs))
+			clear(&chips)
+		}
+	}
+
+	return skald.dialog(
+		ctx,
+		open = true,
+		on_dismiss = on_widget_text_closed,
+		width = TEXT_DIALOG_WIDTH,
+		max_width = 700,
+		content = skald.col(
+			skald.text(widget_value_label(value), th.color.fg, th.font.size_lg),
+			skald.text(
+				"Shown on the page, in the text file and on the OBS source for this value.",
+				th.color.fg_muted, th.font.size_sm,
+			),
+			skald.spacer(th.spacing.md),
+			skald.scroll(ctx, {0, 420}, skald.col(
+				..body[:], spacing = th.spacing.sm, cross_align = .Stretch,
+			)),
+			skald.spacer(th.spacing.md),
+			skald.row(
+				skald.button(ctx, "Reset", Msg(Widget_Text_Reset{})),
+				skald.flex(1, skald.spacer(0)),
+				skald.button(ctx, "Done", Msg(Widget_Text_Closed{}),
+					bg = th.color.primary, fg = th.color.on_primary),
+				spacing     = th.spacing.sm,
+				cross_align = .Center,
+			),
+			spacing     = 0,
+			cross_align = .Stretch,
+		),
+	)
+}
+
+on_widget_text_closed :: proc() -> Msg { return Widget_Text_Closed{} }
+on_widget_text_draft :: proc(v: string) -> Msg { return Widget_Text_Draft(v) }
 
 view_widget_style_dialog :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	th := ctx.theme

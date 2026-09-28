@@ -434,3 +434,50 @@ widget_text :: proc(v: Widget_Value, fallback: string, f: Widget_Facts) -> strin
 	if len(template) == 0 do template = fallback
 	return widget_expand(template, f)
 }
+
+// The value a Single-values page shows, when it has one.
+//
+// Region_Bosses is the odd one out: it's a list, and a list needs a template
+// per row rather than one for the whole thing. Until that exists it simply
+// isn't editable, which is better than offering a box that can only mangle it.
+widget_value_for_kind :: proc(k: Widget_Kind) -> (Widget_Value, bool) {
+	switch k {
+	case .Progress:      return .Progress, true
+	case .Next_Boss:     return .Next, true
+	case .Deaths:        return .Deaths, true
+	case .Attempts:      return .Attempts, true
+	case .Session:       return .Session, true
+	case .Character:     return .Character, true
+	case .Region:        return .Region, true
+	case .Region_Bosses: return .Progress, false
+	}
+	return .Progress, false
+}
+
+// The built-in wording for a value, used when the user hasn't written their
+// own. This is the served page's default; the obs-websocket sources pass
+// their own self-labelling variants at the call site.
+widget_default_template :: proc(v: Widget_Value) -> string {
+	switch v {
+	case .Progress:  return TPL_PROGRESS
+	case .Killed:    return TPL_KILLED
+	case .Total:     return TPL_TOTAL
+	case .Remaining: return TPL_REMAINING
+	case .Percent:   return TPL_PERCENT
+	case .Deaths:    return TPL_DEATHS
+	case .Attempts:  return TPL_ATTEMPTS
+	case .Session:   return TPL_SESSION
+	case .Character: return TPL_CHARACTER
+	case .Next:      return TPL_NEXT
+	case .Region:    return TPL_REGION
+	}
+	return ""
+}
+
+// What the given template would show right now, for the editor's preview.
+// Uses the browser-source region so the preview matches the page the user is
+// looking at the URL for.
+widget_preview_of :: proc(template: string) -> string {
+	f := widget_facts(app.settings.ws_region, app.settings.overlay_next_count)
+	return widget_expand(template, f)
+}

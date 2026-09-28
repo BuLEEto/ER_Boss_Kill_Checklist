@@ -74,6 +74,12 @@ Gui :: struct {
 	// Purely view state — which single-value page's style dialog is open.
 	widget_style_open: Maybe(Widget_Kind),
 
+	// The custom-text editor. The draft is heap-owned and edited per
+	// keystroke; it reaches settings when the dialog closes, so a file write
+	// doesn't happen on every character typed.
+	widget_text_open:  Maybe(Widget_Value),
+	widget_text_draft: string,
+
 	// Save-file polling
 	last_mtime: i64,
 	poll_busy:  bool,
@@ -163,6 +169,11 @@ Obsws_Status_Changed :: struct {
 }
 
 Widget_Style_Opened :: distinct Widget_Kind
+Widget_Text_Opened :: distinct Widget_Value
+Widget_Text_Closed :: struct {}
+Widget_Text_Draft :: distinct string
+Widget_Text_Reset :: struct {}
+Widget_Text_Chip :: distinct string
 Widget_Style_Closed :: struct {}
 Widget_Style_Custom_Set :: struct { kind: Widget_Kind, custom: bool }
 Hide_Completed_Set :: distinct bool
@@ -263,6 +274,11 @@ Msg :: union {
 	Obsws_Look_Reset,
 	Obsws_Status_Changed,
 	Widget_Style_Opened,
+	Widget_Text_Opened,
+	Widget_Text_Closed,
+	Widget_Text_Draft,
+	Widget_Text_Reset,
+	Widget_Text_Chip,
 	Widget_Style_Closed,
 	Widget_Style_Custom_Set,
 	Hide_Completed_Set,
@@ -663,6 +679,46 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		// Seed the sources from here rather than from the connect worker:
 		// pushing reads the boss list, and only the GUI thread may do that.
 		if v.connected do obsws_push_update()
+
+	case Widget_Text_Opened:
+		value := Widget_Value(v)
+		out.widget_text_open = value
+		delete(out.widget_text_draft)
+		// Seed with whatever is stored, or blank when the value is still on
+		// its default — an empty box with the default shown underneath reads
+		// as "nothing set yet", where a pre-filled copy of the default reads
+		// as something the user wrote.
+		out.widget_text_draft = strings.clone(app.settings.widget_templates[int(value)].text)
+
+	case Widget_Text_Draft:
+		delete(out.widget_text_draft)
+		out.widget_text_draft = strings.clone(string(v))
+
+	case Widget_Text_Chip:
+		// Append rather than insert at the caret: Skald's text input doesn't
+		// expose one, and appending is predictable enough for chips whose
+		// whole job is saving people from remembering {region_killed}.
+		joined := strings.concatenate({out.widget_text_draft, string(v)})
+		delete(out.widget_text_draft)
+		out.widget_text_draft = joined
+
+	case Widget_Text_Reset:
+		delete(out.widget_text_draft)
+		out.widget_text_draft = strings.clone("")
+
+	case Widget_Text_Closed:
+		if value, open := out.widget_text_open.?; open {
+			sync.guard(&app.mu)
+			settings_set_string(
+				&app.settings.widget_templates[int(value)].text,
+				strings.trim_space(out.widget_text_draft),
+			)
+			app_save_settings()
+			out = gui_after_data_change(out)
+		}
+		out.widget_text_open = nil
+		delete(out.widget_text_draft)
+		out.widget_text_draft = strings.clone("")
 
 	case Widget_Style_Opened:
 		out.widget_style_open = Widget_Kind(v)
