@@ -1592,10 +1592,22 @@ view_status_bar :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 // value until you re-pasted it. Everything about how a page looks is now
 // resolved server-side from settings, so this string never changes and a
 // restyle reaches OBS on the next live update instead.
+// The port the URLs should advertise.
+//
+// app.server.port is only set once the server has actually bound, so with the
+// server switched off every copied URL read "localhost:0" — a link that can
+// never work, handed out by a Copy button that looked perfectly normal. The
+// configured port is the honest answer in that state: it is the one the server
+// will use when it is switched back on.
+url_port :: proc() -> int {
+	if server_is_running(&app.server) do return app.server.port
+	return app.settings.server_port
+}
+
 widget_url_string :: proc(kind: Widget_Kind, allocator := context.allocator) -> string {
 	return fmt.aprintf(
 		"http://localhost:%d/widget?type=%s",
-		app.server.port, widget_slug(kind),
+		url_port(), widget_slug(kind),
 		allocator = allocator,
 	)
 }
@@ -1603,7 +1615,7 @@ widget_url_string :: proc(kind: Widget_Kind, allocator := context.allocator) -> 
 overlay_url_string :: proc(allocator := context.allocator) -> string {
 	b := strings.builder_make(allocator)
 	fmt.sbprintf(&b, "http://localhost:%d/overlay?mode=%s",
-		app.server.port, app.settings.overlay_mode)
+		url_port(), app.settings.overlay_mode)
 	if app.settings.overlay_mode == "next" {
 		fmt.sbprintf(&b, "&count=%d", app.settings.overlay_next_count)
 	}
@@ -1633,7 +1645,7 @@ overlay_url_string :: proc(allocator := context.allocator) -> string {
 
 mobile_url_string :: proc(allocator := context.allocator) -> string {
 	host := len(app.lan_ip) > 0 ? app.lan_ip : "localhost"
-	return fmt.aprintf("http://%s:%d/mobile", host, app.server.port, allocator = allocator)
+	return fmt.aprintf("http://%s:%d/mobile", host, url_port(), allocator = allocator)
 }
 
 // ----------------------------------------------------------------------------
