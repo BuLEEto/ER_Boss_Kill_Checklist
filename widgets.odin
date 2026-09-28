@@ -194,11 +194,13 @@ Widget_Facts :: struct {
 	all_regions: []string,
 }
 
-widget_facts :: proc(
-	region: Region_Choice,
-	next_count: int,
-	allocator := context.temp_allocator,
-) -> (f: Widget_Facts) {
+// Frame-scoped, deliberately. There is no allocator parameter because one
+// would be a lie: the containers would honour it, but the strings inside
+// next_list and all_regions come from fmt.tprintf, and region_name and
+// character_name point into app state. A caller who asked for facts that
+// outlive the frame would get a slice of dangling pointers after the next
+// free_all(context.temp_allocator).
+widget_facts :: proc(region: Region_Choice, next_count: int) -> (f: Widget_Facts) {
 	f.total, f.killed = count_bosses(app.regions)
 	f.remaining = f.total - f.killed
 	f.percent = f.total > 0 ? f.killed * 100 / f.total : 0
@@ -212,13 +214,13 @@ widget_facts :: proc(
 	f.character_level = level
 	f.has_character = len(name) > 0
 
-	next := app_next_bosses(next_count, allocator)
+	next := app_next_bosses(next_count, context.temp_allocator)
 	if len(next) > 0 {
 		f.next_boss = next[0].boss
 		f.next_place = next[0].place
 		f.has_next = true
 	}
-	list := make([dynamic]string, allocator)
+	list := make([dynamic]string, context.temp_allocator)
 	for b in next do append(&list, fmt.tprintf("%s — %s", b.boss, b.place))
 	f.next_list = list[:]
 
@@ -228,14 +230,14 @@ widget_facts :: proc(
 		f.region_total, f.region_killed = count_region_bosses(r)
 		f.has_region = true
 
-		left := make([dynamic]string, allocator)
+		left := make([dynamic]string, context.temp_allocator)
 		for &b in r.bosses {
 			if !b.killed do append(&left, b.boss)
 		}
 		f.region_bosses = left[:]
 	}
 
-	regions := make([dynamic]string, allocator)
+	regions := make([dynamic]string, context.temp_allocator)
 	for &r in app.regions {
 		r_total, r_killed := count_region_bosses(&r)
 		append(&regions, fmt.tprintf("%s %d/%d", r.region_name, r_killed, r_total))
@@ -477,6 +479,21 @@ widget_default_template :: proc(v: Widget_Value) -> string {
 // What the given template would show right now, for the editor's preview.
 // Uses the browser-source region so the preview matches the page the user is
 // looking at the URL for.
+// The obs-websocket fallback for a value, where it differs from the page's.
+// Those sources label themselves, so replacing the wording takes the label
+// with it — which the editor has to say, or someone types the page default it
+// just showed them and silently loses "Deaths: " from their live source.
+widget_ws_default_template :: proc(v: Widget_Value) -> (string, bool) {
+	switch v {
+	case .Deaths:   return TPL_WS_DEATHS, true
+	case .Attempts: return TPL_WS_ATTEMPTS, true
+	case .Progress, .Killed, .Total, .Remaining, .Percent, .Session,
+	     .Character, .Next, .Region:
+		return "", false
+	}
+	return "", false
+}
+
 widget_preview_of :: proc(template: string) -> string {
 	f := widget_facts(app.settings.ws_region, app.settings.overlay_next_count)
 	return widget_expand(template, f)

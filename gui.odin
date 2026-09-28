@@ -717,6 +717,16 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 				&app.settings.widget_templates[int(value)].text,
 				strings.trim_space(out.widget_text_draft),
 			)
+			// The slug too. Nothing else writes it into live settings — it
+			// only ever arrives from the file — so a value absent from
+			// settings.json keeps slug "" all session. Harmless today
+			// because normalise only runs at startup, but it matches on
+			// slug, so the moment anything calls it again every template
+			// written this session would be dropped.
+			settings_set_string(
+				&app.settings.widget_templates[int(value)].slug,
+				widget_value_slug(value),
+			)
 			app_save_settings()
 			out = gui_after_data_change(out)
 		}

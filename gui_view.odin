@@ -798,8 +798,8 @@ view_obs_browser :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		"Sources → + → Browser in OBS, then paste this into the URL field. Preview opens the real page in your browser — the same one OBS loads, so what you see is what it shows, except that OBS composites it over gameplay rather than onto a blank page.",
 		th.color.fg_muted, th.font.size_xs,
 	))
-	append(&rows, view_copy_row(ctx, "Overlay URL", overlay_url_string(context.temp_allocator), "Preview"))
-	append(&rows, view_copy_row(ctx, "Mobile view", mobile_url_string(context.temp_allocator), "Open"))
+	append(&rows, view_copy_row(ctx, "Overlay URL", overlay_url_string(context.temp_allocator), running ? "Preview" : ""))
+	append(&rows, view_copy_row(ctx, "Mobile view", mobile_url_string(context.temp_allocator), running ? "Open" : ""))
 
 	// What the card actually measures, so the browser source can be sized to
 	// it. The card fills whatever source it's given, so without this the
@@ -889,17 +889,17 @@ view_obs_widgets :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 			badge = skald.text("Custom", th.color.primary, th.font.size_xs)
 		}
 
-			// Region bosses is a list, so there's no single line to edit.
-			text_button := skald.spacer(0)
-			if value, ok := widget_value_for_kind(kind); ok {
-				// ASCII asterisk deliberately: U+270E renders as a .notdef box
-				// in Inter, and the modified-marker convention reads clearly
-				// enough without reaching for a glyph the font may not have.
-				label := len(app.settings.widget_templates[int(value)].text) > 0 \
-					? "Text *" : "Text…"
-				text_button = skald.button(ctx, label, Msg(Widget_Text_Opened(value)),
-					id = skald.hash_id(fmt.tprintf("widget.text.%s", widget_slug(kind))))
-			}
+		// Region bosses is a list, so there's no single line to edit.
+		text_button := skald.spacer(0)
+		if value, ok := widget_value_for_kind(kind); ok {
+			// ASCII asterisk deliberately: U+270E renders as a .notdef box
+			// in Inter, and the modified-marker convention reads clearly
+			// enough without reaching for a glyph the font may not have.
+			label := len(app.settings.widget_templates[int(value)].text) > 0 \
+				? "Text *" : "Text…"
+			text_button = skald.button(ctx, label, Msg(Widget_Text_Opened(value)),
+				id = skald.hash_id(fmt.tprintf("widget.text.%s", widget_slug(kind))))
+		}
 
 		append(&rows, skald.row(
 			skald.col(
@@ -1038,27 +1038,33 @@ view_obs_text :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 // place and having it apply in one place would be the surprise.
 // ---------------------------------------------------------------------------
 
-// Chips in rows of four. Skald has no wrapping container, and a dozen of
-// these on one line runs off the side of the dialog.
+// Chips as a wrapping strip.
+//
+// This was hand-rolled four-per-row until a review pointed out skald.wrap_row,
+// which has been there all along and is documented for exactly this. Fixed
+// chunking also wrapped at a count rather than at the available width, so the
+// rows went ragged as soon as the UI scale changed.
+//
+// The width has to be passed in. Left to itself the strip takes the full
+// available width, which inside a stretched column is wider than the dialog —
+// the chips then run off the right edge and drag the centred section headers
+// out with them.
 @(private = "file")
-chip_rows :: proc(ctx: ^skald.Ctx(Msg), names: []string) -> []skald.View {
-	CHIPS_PER_ROW :: 4
+chip_row :: proc(ctx: ^skald.Ctx(Msg), names: []string, width: f32) -> skald.View {
 	th := ctx.theme
 
-	out := make([dynamic]skald.View, context.temp_allocator)
 	chips := make([dynamic]skald.View, context.temp_allocator)
-
-	for name, i in names {
+	for name in names {
 		token := fmt.tprintf("{{%s}}", name)
 		append(&chips, skald.button(ctx, token, Msg(Widget_Text_Chip(token)),
 			id = skald.hash_id(fmt.tprintf("widget.text.chip.%s", name))))
-
-		if len(chips) == CHIPS_PER_ROW || i == len(names) - 1 {
-			append(&out, skald.row(..chips[:], spacing = th.spacing.xs))
-			clear(&chips)
-		}
 	}
-	return out[:]
+	return skald.wrap_row(
+		..chips[:],
+		spacing = th.spacing.xs,
+		line_spacing = th.spacing.xs,
+		width = width,
+	)
 }
 
 TEXT_DIALOG_WIDTH :: f32(640)
@@ -1098,6 +1104,19 @@ view_widget_text_dialog :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		th.color.fg_muted, th.font.size_xs, text_w,
 	))
 
+	// Two values have a different built-in on the OBS text sources, because
+	// those label themselves. Saying so matters: otherwise someone reads the
+	// wording above, types it to match, and their live source quietly loses
+	// the only label it had.
+	if ws, has_ws := widget_ws_default_template(value); has_ws {
+		append(&body, paragraph(ctx,
+			using_default \
+				? fmt.tprintf("On an obs-websocket text source it reads %s instead, since that has no caption of its own. Your own wording replaces both.", ws) \
+				: fmt.tprintf("This replaces the obs-websocket source's wording too, which would otherwise read %s.", ws),
+			th.color.warning, th.font.size_xs, text_w,
+		))
+	}
+
 	// The preview is the point of the dialog. A typo'd placeholder shows up
 	// here as literal braces, which is the whole reason unknown ones aren't
 	// silently blanked.
@@ -1113,7 +1132,7 @@ view_widget_text_dialog :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	))
 
 	own := widget_value_placeholders(value)
-	for v in chip_rows(ctx, own) do append(&body, v)
+	append(&body, chip_row(ctx, own, text_w))
 
 	// The rest still work — the facts are gathered whole, so "{deaths} deaths,
 	// next up {boss}" is a perfectly reasonable thing to want on one source.
@@ -1130,7 +1149,7 @@ view_widget_text_dialog :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		append(&body, skald.text(
 			"Anything else, if you want it:", th.color.fg_muted, th.font.size_xs,
 		))
-		for v in chip_rows(ctx, others[:]) do append(&body, v)
+		append(&body, chip_row(ctx, others[:], text_w))
 	}
 
 	return skald.dialog(
@@ -1188,7 +1207,8 @@ view_widget_style_dialog :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	// unambiguous which page it belongs to, and it keeps eight rows of
 	// near-identical text off the panel.
 	append(&body, view_copy_row(
-		ctx, "URL", widget_url_string(kind, context.temp_allocator), "Preview",
+		ctx, "URL", widget_url_string(kind, context.temp_allocator),
+		server_is_running(&app.server) ? "Preview" : "",
 	))
 	append(&body, skald.spacer(th.spacing.sm))
 

@@ -36,18 +36,21 @@ show_fatal_dialog :: proc(message: string) {}
 
 // Hand a URL to whatever the desktop opens links with.
 //
-// Blocking on purpose, and therefore called from a worker rather than the GUI
-// thread: xdg-open can sit there until the browser is up, and there is no way
-// to release a process handle in core:os without waiting for it. Waiting on a
-// worker costs nothing; waiting on the GUI thread would freeze the window
-// during the one action whose whole point is that it happens elsewhere.
+// process_start, not process_exec. process_exec builds pipes for stdout and
+// stderr and reads them to EOF — and a browser launched by xdg-open inherits
+// those pipes, so exec doesn't return until the browser is *closed*, not until
+// it opens. Measured: `sh -c 'sleep 3 & exit 0'` takes three seconds to come
+// back. Every click would have parked a worker thread, and its temp arena,
+// for as long as the browser stayed open.
+//
+// Without pipes there is nothing to hold open, so the wait is for xdg-open
+// itself, which exits as soon as it has handed the URL over. The wait is what
+// reaps the child and releases the handle, and it runs on a worker, so a slow
+// handler costs nothing.
 open_url :: proc(url: string) -> bool {
-	state, stdout, stderr, err := os.process_exec(
-		os.Process_Desc{command = {"xdg-open", url}},
-		context.allocator,
-	)
-	defer delete(stdout)
-	defer delete(stderr)
+	process, err := os.process_start(os.Process_Desc{command = {"xdg-open", url}})
+	if err != nil do return false
 
-	return err == nil && state.success
+	state, wait_err := os.process_wait(process)
+	return wait_err == nil && state.success
 }
