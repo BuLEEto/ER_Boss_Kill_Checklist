@@ -67,17 +67,17 @@ obs_text_write_all :: proc() -> os.Error {
 
 	character := "No character"
 	if f.has_character {
-		character = widget_expand(TPL_CHARACTER, f)
+		character = widget_text(.Character, TPL_CHARACTER, f)
 	}
 
 	attempts_text := "—"
 	if f.attempts_known {
-		attempts_text = widget_expand(TPL_ATTEMPTS, f)
+		attempts_text = widget_text(.Attempts, TPL_ATTEMPTS, f)
 	}
 
 	next_one := "All bosses defeated"
 	if f.has_next {
-		next_one = widget_expand(TPL_NEXT, f)
+		next_one = widget_text(.Next, TPL_NEXT, f)
 	}
 	next_many := len(f.next_list) > 0 \
 		? obs_join_lines(f.next_list, app.settings.text_roomy_lines) \
@@ -86,7 +86,7 @@ obs_text_write_all :: proc() -> os.Error {
 	region := "All regions cleared"
 	region_bosses := "All regions cleared"
 	if f.has_region {
-		region = widget_expand(TPL_REGION, f)
+		region = widget_text(.Region, TPL_REGION, f)
 		region_bosses = obs_join_lines(f.region_bosses, app.settings.text_roomy_lines)
 	}
 
@@ -95,14 +95,14 @@ obs_text_write_all :: proc() -> os.Error {
 	all_regions := obs_join_lines(f.all_regions, app.settings.text_roomy_lines)
 
 	contents := [?]string {
-		widget_expand(TPL_PROGRESS, f),
-		widget_expand(TPL_KILLED, f),
-		widget_expand(TPL_TOTAL, f),
-		widget_expand(TPL_REMAINING, f),
-		widget_expand(TPL_PERCENT, f),
-		widget_expand(TPL_DEATHS, f),
+		widget_text(.Progress, TPL_PROGRESS, f),
+		widget_text(.Killed, TPL_KILLED, f),
+		widget_text(.Total, TPL_TOTAL, f),
+		widget_text(.Remaining, TPL_REMAINING, f),
+		widget_text(.Percent, TPL_PERCENT, f),
+		widget_text(.Deaths, TPL_DEATHS, f),
 		attempts_text,
-		widget_expand(TPL_SESSION, f),
+		widget_text(.Session, TPL_SESSION, f),
 		character,
 		next_one,
 		next_many,

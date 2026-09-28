@@ -358,3 +358,79 @@ WIDGET_PLACEHOLDERS :: [?]string {
 	"boss", "place",
 	"region", "region_killed", "region_total",
 }
+
+// ============================================================================
+// Templatable values
+//
+// A separate enum from Widget_Kind because the sets genuinely differ: the
+// served pages expose four values the OBS text sources don't (killed, total,
+// remaining, percent), and Widget_Kind carries Region_Bosses, which is a list
+// rather than a value and has no single template.
+//
+// This is what a user's custom text is keyed on, so the slugs are permanent —
+// renaming one silently drops whatever someone had written.
+// ============================================================================
+
+Widget_Value :: enum {
+	Progress,
+	Killed,
+	Total,
+	Remaining,
+	Percent,
+	Deaths,
+	Attempts,
+	Session,
+	Character,
+	Next,
+	Region,
+}
+
+widget_value_slug :: proc(v: Widget_Value) -> string {
+	switch v {
+	case .Progress:  return "progress"
+	case .Killed:    return "killed"
+	case .Total:     return "total"
+	case .Remaining: return "remaining"
+	case .Percent:   return "percent"
+	case .Deaths:    return "deaths"
+	case .Attempts:  return "attempts"
+	case .Session:   return "session"
+	case .Character: return "character"
+	case .Next:      return "next"
+	case .Region:    return "region"
+	}
+	return "progress"
+}
+
+widget_value_label :: proc(v: Widget_Value) -> string {
+	switch v {
+	case .Progress:  return "Progress"
+	case .Killed:    return "Bosses defeated"
+	case .Total:     return "Bosses in the list"
+	case .Remaining: return "Bosses left"
+	case .Percent:   return "Percent complete"
+	case .Deaths:    return "Deaths"
+	case .Attempts:  return "Attempts"
+	case .Session:   return "This session"
+	case .Character: return "Character"
+	case .Next:      return "Next boss"
+	case .Region:    return "Region"
+	}
+	return ""
+}
+
+// One value's text, ready to show.
+//
+// `fallback` is the surface's own default, used until someone writes
+// something of their own. That split is what lets the obs-websocket sources
+// keep labelling themselves ("Deaths: 57") while the served page shows a bare
+// number — they pass different fallbacks for the same value.
+//
+// A custom template is deliberately shared across all three surfaces. Writing
+// "I have rekt {killed} of {total}" once and having it appear on the overlay
+// but not in the text file would be a puzzle, not a feature.
+widget_text :: proc(v: Widget_Value, fallback: string, f: Widget_Facts) -> string {
+	template := app.settings.widget_templates[int(v)].text
+	if len(template) == 0 do template = fallback
+	return widget_expand(template, f)
+}

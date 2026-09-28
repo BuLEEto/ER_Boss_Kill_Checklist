@@ -68,7 +68,8 @@ POLL_SECONDS_DEFAULT :: 5
 //  10  obs-websocket back, text sources only, for OBS builds without CEF
 //  11  the obs-websocket text sources get a look of their own
 //  12  the overlay card can be sent to OBS as a Browser source
-SETTINGS_VERSION :: 12
+//  13  per-value custom text for the OBS values
+SETTINGS_VERSION :: 13
 
 // Which region an integration follows. One of these per integration
 // rather than one shared between them: the OBS tab has a panel per
@@ -140,6 +141,18 @@ appearance_apply_bounds :: proc(a: ^Appearance) {
 // ignored; on means `look` is used whole. Storing the slug rather than
 // relying on array position keeps someone's styling attached to the page
 // they set it on even if Widget_Kind is reordered later.
+// One value's custom text, if the user has written any.
+//
+// `text` empty means "use the built-in default", which is why an untouched
+// install stores nothing — and why a default can still be improved later
+// without overwriting what someone chose. Keyed by slug for the same reason
+// widget_looks is: reordering Widget_Value must not move someone's wording
+// onto a different value.
+Widget_Template :: struct {
+	slug: string `json:"slug"`,
+	text: string `json:"text"`,
+}
+
 Widget_Look :: struct {
 	slug:   string     `json:"slug"`,
 	custom: bool       `json:"custom"`,
@@ -316,6 +329,10 @@ Settings :: struct {
 	// position, so reordering Widget_Kind can't shuffle someone's styling
 	// onto the wrong page.
 	widget_looks: [len(Widget_Kind)]Widget_Look `json:"widget_looks"`,
+
+	// Per-value custom text. Shared by all three OBS surfaces: one edit, the
+	// same wording wherever that value appears.
+	widget_templates: [len(Widget_Value)]Widget_Template `json:"widget_templates"`,
 
 	// ---- Attempts ------------------------------------------------------
 	//
@@ -586,6 +603,11 @@ settings_own_strings :: proc(s: ^Settings, allocator := context.allocator) {
 
 	// The per-page looks carry strings too, and they're freed the same way
 	// when a setting changes — so they have to be heap-owned like the rest.
+	for &w in s.widget_templates {
+		w.slug = strings.clone(w.slug, allocator)
+		w.text = strings.clone(w.text, allocator)
+	}
+
 	for &w in s.widget_looks {
 		w.slug = strings.clone(w.slug, allocator)
 		w.look.accent = strings.clone(w.look.accent, allocator)
@@ -624,6 +646,33 @@ settings_widget_appearance :: proc(k: Widget_Kind) -> Appearance {
 // the right page. Anything whose slug isn't a page any more is dropped;
 // pages with nothing stored get an empty slot. Runs once, at load, on the
 // GUI thread — after which the array is only ever indexed.
+// Put every stored template in the slot its value owns. Same reasoning as
+// settings_normalise_widget_looks: the file records a slug per entry, so
+// reordering Widget_Value later can't move someone's wording onto a different
+// value.
+//
+// Whatever slug came out of the file is left alone. Two reasons, and the
+// second one cost an hour: widget_value_slug returns a literal, and every
+// string in live settings is heap-owned so that changing one can free the old
+// value — but more importantly this proc runs more than once. It is called at
+// load and again from settings_apply_bounds by way of app_apply_settings, so
+// clearing the slug here made the second pass match nothing and silently drop
+// every custom template.
+settings_normalise_widget_templates :: proc(s: ^Settings) {
+	stored := s.widget_templates
+	s.widget_templates = {}
+
+	for v in Widget_Value {
+		slug := widget_value_slug(v)
+		for w in stored {
+			if w.slug == slug {
+				s.widget_templates[int(v)] = w
+				break
+			}
+		}
+	}
+}
+
 settings_normalise_widget_looks :: proc(s: ^Settings) {
 	stored := s.widget_looks
 	s.widget_looks = {}
@@ -772,6 +821,9 @@ save_settings_file :: proc(s: Settings) -> os.Error {
 	for k in Widget_Kind {
 		out.widget_looks[int(k)].slug = widget_slug(k)
 	}
+	for v in Widget_Value {
+		out.widget_templates[int(v)].slug = widget_value_slug(v)
+	}
 
 	data, jerr := json.marshal(out, {pretty = true}, context.temp_allocator)
 	if jerr != nil {
@@ -841,6 +893,7 @@ settings_apply_bounds :: proc(s: ^Settings) {
 	obs_text_look_apply_bounds(&s.obsws_look)
 
 	settings_normalise_widget_looks(s)
+	settings_normalise_widget_templates(s)
 	for &w in s.widget_looks {
 		if w.custom do appearance_apply_bounds(&w.look)
 	}

@@ -1039,26 +1039,26 @@ obsws_push_overlay_size :: proc() {
 obsws_source_text :: proc(kind: Widget_Kind, f: Widget_Facts, roomy: bool) -> string {
 	switch kind {
 	case .Progress:
-		return widget_expand(TPL_PROGRESS, f)
+		return widget_text(.Progress, TPL_PROGRESS, f)
 	case .Next_Boss:
 		if !f.has_next do return "All bosses defeated"
-		return widget_expand(TPL_NEXT, f)
+		return widget_text(.Next, TPL_NEXT, f)
 	case .Deaths:
-		return widget_expand(TPL_WS_DEATHS, f)
+		return widget_text(.Deaths, TPL_WS_DEATHS, f)
 	case .Character:
 		if !f.has_character do return "No character"
-		return widget_expand(TPL_CHARACTER, f)
+		return widget_text(.Character, TPL_CHARACTER, f)
 	case .Region:
 		if !f.has_region do return "All regions cleared"
-		return widget_expand(TPL_REGION, f)
+		return widget_text(.Region, TPL_REGION, f)
 	case .Region_Bosses:
 		if !f.has_region do return "All regions cleared"
 		return obs_join_lines(f.region_bosses, roomy)
 	case .Attempts:
 		if !f.attempts_known do return "Attempt —"
-		return widget_expand(TPL_WS_ATTEMPTS, f)
+		return widget_text(.Attempts, TPL_WS_ATTEMPTS, f)
 	case .Session:
-		return f.session
+		return widget_text(.Session, TPL_SESSION, f)
 	}
 	return ""
 }
