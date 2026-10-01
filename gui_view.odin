@@ -583,11 +583,22 @@ view_region :: proc(
 			name = fmt.tprintf("[%d] %s", b.difficulty, b.boss)
 		}
 
+		// Name and place sit together, with the slack after them rather than
+		// between them. Pushed apart, a maximised window put a thousand
+		// pixels of nothing between a boss and where to find it, and the two
+		// stopped reading as one row.
+		//
+		// No fixed column for the name: they run from 8 characters to 85
+		// ("Putrid Crystalian (Ringblade) & ..."), so a column wide enough
+		// for the longest would reintroduce the gap for everything else, and
+		// one sized for the median would cut the multi-boss entries in half.
+		// Ragged, but never truncated, and the place keeps the muted colour
+		// and smaller size that tell the two apart.
 		append(&boss_rows, skald.row(
 			skald.text(marker, colour, th.font.size_sm),
 			skald.text(name, b.killed ? th.color.fg_muted : th.color.fg, th.font.size_sm),
-			skald.flex(1, skald.spacer(0)),
 			skald.text(b.place, th.color.fg_muted, th.font.size_xs),
+			skald.flex(1, skald.spacer(0)),
 			spacing     = th.spacing.sm,
 			padding     = 2,
 			cross_align = .Center,
