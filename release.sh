@@ -78,12 +78,26 @@ echo "[2/4] Building portable Linux archive..."
 make tar > /dev/null
 TAR_FILE="${APP_NAME}_${NEW_VERSION}_linux.tar.gz"
 
+# Nexus Mods rejects a bare .tar.gz as an unrecognised archive format, so the
+# Linux build also goes out as a .7z. Packed from the directory rather than
+# around the tarball: a .7z containing a .tar.gz is a nested archive, which is
+# its own listed rejection reason, and it makes users extract twice. 7z keeps
+# the executable bit, so the binary still runs straight out of it.
+if command -v 7z > /dev/null; then
+    rm -f "${APP_NAME}_${NEW_VERSION}_linux.7z"
+    7z a "${APP_NAME}_${NEW_VERSION}_linux.7z" "${APP_NAME}_${NEW_VERSION}_linux" > /dev/null
+    SEVENZ_FILE="${APP_NAME}_${NEW_VERSION}_linux.7z"
+fi
+
 echo "[3/4] Building .deb package..."
 make deb > /dev/null
 DEB_FILE="${APP_NAME}_${NEW_VERSION}_${ARCH}.deb"
 
 # Optional extra: .7z alongside, for anywhere that wants the smaller file.
 ARTIFACTS=("$TAR_FILE" "$DEB_FILE")
+if [ -n "${SEVENZ_FILE:-}" ]; then
+    ARTIFACTS+=("$SEVENZ_FILE")
+fi
 if command -v 7z > /dev/null; then
     rm -f "${DEB_FILE}.7z"
     7z a "${DEB_FILE}.7z" "$DEB_FILE" > /dev/null
@@ -109,3 +123,4 @@ if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
 fi
 echo "  * build the Windows zip on a Windows machine (see BUILD.md)"
 echo "  * both the .deb and the .tar.gz carry SDL3, so neither needs a system one"
+echo "  * the .7z is the same Linux build, for Nexus — it won't take a bare .tar.gz"
