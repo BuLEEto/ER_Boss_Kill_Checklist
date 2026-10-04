@@ -131,7 +131,7 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 			Help_Step{
 				"Change the wording, if you want to",
-				"Text… on any row opens an editor. The value goes in as a placeholder — {killed}, {deaths}, {boss} and so on — and everything around it is yours: \"I have rekt {killed} of {total} bosses!\", emoji included.\n\nThe preview under the box shows it against your actual save, so you can see it before it goes anywhere near a stream. Click a placeholder to add it rather than typing the braces. Anything in braces that isn't a placeholder is left exactly as typed, so a mistake shows up in the preview instead of quietly vanishing.\n\nEmpty means the built-in wording, and Reset puts it back.",
+				"Text… on any row opens an editor. The value goes in as a placeholder — {killed}, {deaths}, {boss} and so on — and everything around it is yours: \"I have rekt {killed} of {total} bosses!\", emoji included.\n\nThe preview under the box shows it against your actual save, so you can see it before it goes anywhere near a stream. Click a placeholder to add it rather than typing the braces. Anything in braces that isn't a placeholder is left exactly as typed, so a mistake shows up in the preview instead of quietly vanishing.\n\nEmpty means the built-in wording, and Reset puts it back.\n\nSetting your own wording also drops the caption above that value on its page — having said what you want on screen, you don't want its name stacked on top.",
 			},
 			Help_Step{
 				"One wording, everywhere that value appears",
@@ -203,7 +203,7 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 			Help_Step{
 				"Change the wording, if you want to",
-				"Text… on any row opens an editor. The value goes in as a placeholder — {killed}, {deaths}, {boss} and so on — and everything around it is yours: \"I have rekt {killed} of {total} bosses!\", emoji included.\n\nThe preview under the box shows it against your actual save, so you can see it before it goes anywhere near a stream. Click a placeholder to add it rather than typing the braces. Anything in braces that isn't a placeholder is left exactly as typed, so a mistake shows up in the preview instead of quietly vanishing.\n\nEmpty means the built-in wording, and Reset puts it back.",
+				"Text… on any row opens an editor. The value goes in as a placeholder — {killed}, {deaths}, {boss} and so on — and everything around it is yours: \"I have rekt {killed} of {total} bosses!\", emoji included.\n\nThe preview under the box shows it against your actual save, so you can see it before it goes anywhere near a stream. Click a placeholder to add it rather than typing the braces. Anything in braces that isn't a placeholder is left exactly as typed, so a mistake shows up in the preview instead of quietly vanishing.\n\nEmpty means the built-in wording, and Reset puts it back.\n\nSetting your own wording also drops the caption above that value on its page — having said what you want on screen, you don't want its name stacked on top.",
 			},
 			Help_Step{
 				"One wording, everywhere that value appears",

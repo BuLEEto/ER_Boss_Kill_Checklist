@@ -263,9 +263,12 @@ Leave the box empty for the built-in wording.
 
 **The wording is shared.** The same value on its page, in its text file and on
 an obs-websocket source all read the same — change Deaths once and `deaths.txt`
-changes with it. That's also why it's separate from **Caption above each value**,
-which is a separate line in its own style and only applies to these pages; with
-both on you get the caption above your own wording.
+changes with it.
+
+Setting your own wording also drops the caption for that value. "DEATHS" above
+"💀 24 deaths" repeats the one thing you just chose for yourself, so the page
+shows your line alone. Values you haven't touched keep their caption as before,
+and `?label=true` on the URL forces it back if you want both.
 
 Lists have no editor — Region bosses and the "one per line" files need a wording
 per row rather than one for the whole thing, which isn't built yet.

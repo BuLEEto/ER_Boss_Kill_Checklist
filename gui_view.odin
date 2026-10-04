@@ -937,7 +937,7 @@ view_obs_widgets :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		on_widget_labels, id = skald.hash_id(ID_WIDGET_LABELS),
 	))
 	append(&rows, paragraph(ctx,
-		"\"DEATHS\" above the number, and so on. Turn it off if you're drawing your own labels in OBS — but a bare number on its own says nothing to a viewer.\n\nThis is a separate line above the value, in its own style, and it only applies to these pages. Putting a word inside the text instead — \"Deaths: {deaths}\" — is a different thing, and reaches the text file and the OBS source too. With both on you get the caption above your own wording.",
+		"\"DEATHS\" above the number, and so on. Turn it off if you're drawing your own labels in OBS — but a bare number on its own says nothing to a viewer.\n\nThis is a separate line above the value, in its own style, and it only applies to these pages. It also steps aside for a value you have written your own wording for: having said what you want on screen, you don't want the value's name stacked on top of it.",
 		th.color.fg_muted, th.font.size_xs,
 	))
 

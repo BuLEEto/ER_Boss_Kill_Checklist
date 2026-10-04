@@ -646,6 +646,11 @@ handle_widget :: proc(req: ^http.Request, res: ^http.Response) {
 
 	label, value, lines := widget_content(kind_param)
 
+	custom_text := false
+	if v, known := widget_value_from_slug(kind_param); known {
+		custom_text = widget_has_custom_text(v)
+	}
+
 	views := make([]Widget_Line, len(lines), context.temp_allocator)
 	for line, i in lines do views[i] = Widget_Line{text = line}
 
@@ -667,8 +672,14 @@ handle_widget :: proc(req: ^http.Request, res: ^http.Response) {
 		// On unless turned off. These pages are standalone sources — a
 		// bare "57" on a stream says nothing, and the caption is the only
 		// thing that makes it a death counter rather than a number.
+		//
+		// Custom wording turns it off, though. Writing "💀 24 deaths" says
+		// what you want on screen; stacking "DEATHS" above it repeats the
+		// one thing you just chose for yourself. ?label=true still forces
+		// it back for anyone who does want both.
 		show_label = label_param != "false" &&
-		             (app.settings.widget_show_labels || label_param == "true"),
+		             ((app.settings.widget_show_labels && !custom_text) ||
+		              label_param == "true"),
 		body_class = body_class,
 		theme_css  = overlay_theme_css(look),
 	}

@@ -536,3 +536,19 @@ widget_value_placeholders :: proc(v: Widget_Value) -> []string {
 	}
 	return nil
 }
+
+// The value a /widget page shows, for the slugs that have one.
+//
+// The page set is wider than Widget_Value: next_list and region_bosses are
+// lists, so they have no single template and no custom wording to speak of.
+widget_value_from_slug :: proc(slug: string) -> (Widget_Value, bool) {
+	for v in Widget_Value {
+		if widget_value_slug(v) == slug do return v, true
+	}
+	return .Progress, false
+}
+
+// Has the user written their own wording for this value?
+widget_has_custom_text :: proc(v: Widget_Value) -> bool {
+	return len(app.settings.widget_templates[int(v)].text) > 0
+}
