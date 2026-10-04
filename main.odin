@@ -5,7 +5,7 @@ import "core:os"
 import "gui:skald"
 import http "src/libs/http"
 
-APP_VERSION :: "2.1.4"
+APP_VERSION :: "2.1.5"
 
 // ============================================================================
 // Entry point
