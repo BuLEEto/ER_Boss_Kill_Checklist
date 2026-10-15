@@ -42,14 +42,14 @@ help_title :: proc(topic: Help_Topic) -> string {
 help_intro :: proc(topic: Help_Topic) -> string {
 	switch topic {
 	case .Browser_Source:
-		return "The main way to get this on stream, and the one every OBS user already knows: paste a URL into a Browser source. OBS renders the page itself, styled and laid out here, updating live — there's no refresh interval to set.\n\nTwo shapes: the overlay card, which is everything in one box, and a page per value for when you want the numbers in different corners of your layout."
+		return "Paste a URL into an OBS Browser source. OBS renders the page itself, styled and laid out here, and it updates live — there's no refresh interval to set.\n\nTwo shapes: the overlay card, which is everything in one box, and a page per value, for numbers in different corners of your layout."
 	case .Text_Files:
 		return "The most compatible option. The app keeps a folder of small text files up to date, and OBS text sources read straight from them. No browser source, no extra CPU, and it works on every version of OBS."
 	case .Obs_Sources:
-		return "For the OBS builds that have no Browser source at all — Debian and Ubuntu package OBS without CEF, so the browser-source panels are no use on them. This connects to OBS's own WebSocket server and creates real OBS text sources instead, keeping their text current as you play.\n\nWindow-capturing a browser is the other way round it, but that needs a browser window per value, and eight of them while you're playing isn't a workflow."
+		return "For the OBS builds with no Browser source at all — Debian and Ubuntu package OBS without CEF, so the browser-source panels are no use on them. This connects to OBS's own WebSocket server and creates real OBS text sources instead, keeping their text current as you play."
 
 	case .Single_Values:
-		return "One page per value, each added to OBS as its own Browser source. Use these when you want the numbers spread around your layout rather than gathered in one card — a deaths counter in one corner, the boss list in another.\n\nThey're the same technology as the overlay card, so they get the same things an OBS text source can't do: real alignment, a line height you can set, and colours and fonts chosen here rather than per-source in OBS."
+		return "One page per value, each added to OBS as its own Browser source. Use these when you want the numbers spread around your layout rather than gathered in one card — a deaths counter in one corner, the boss list in another.\n\nLike the overlay card, they give you what an OBS text source can't: real alignment, a line height you can set, and colours and fonts chosen here rather than per source in OBS."
 	case .None:
 		return ""
 	}
@@ -64,7 +64,7 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 		append(&steps,
 			Help_Step{
 				"Copy the overlay URL",
-				"Pick the mode and background above, then press Copy next to Overlay URL.\n\nPreview beside it opens the real page in your browser — the same one OBS loads, so it can't show you something different. It's also what makes the card measure itself, which is where the Card size below comes from.",
+				"Pick the mode and background above, then press Copy next to Overlay URL.\n\nPreview beside it opens the real page in your browser — the same one OBS loads. Opening it once also fills in the Card size shown below.",
 			},
 			Help_Step{
 				"Add a Browser source in OBS",
@@ -72,7 +72,7 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 			Help_Step{
 				"Paste the URL and size the source",
-				"Put it in the URL field, then set Width and Height to the Card size shown on this panel — the card fills the source exactly, so a source that size is the card with nothing spare around it.\n\nThat number appears once the page has loaded for the first time, and it follows your mode, region and text size rather than being a fixed guess. If you have obs-websocket connected, the last panel can create this source and keep it at that size for you.",
+				"Put it in the URL field, then set Width and Height to the Card size shown on this panel — the card fills the source exactly, so a source that size is the card with nothing spare around it.\n\nThat number appears once the page has loaded for the first time, and it follows your mode, region and text size. If you have obs-websocket connected, the last panel can create this source and keep it at that size for you.",
 			},
 			Help_Step{
 				"Dark panel, or just the text",
@@ -99,8 +99,8 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 				"Everything here comes from the save file, and Elden Ring only writes that every so often. Expect a kill to show up within about ten seconds of the fight ending, not the instant the boss falls — soon enough for the replay, not for the exact moment.",
 			},
 			Help_Step{
-				"Why this and not a text source",
-				"OBS text sources have no alignment and no line height, so a multi-line list is stuck left-aligned with whatever spacing the font gives. This is a web page, so Align actually aligns every line, and the styling is yours to change.",
+				"Text source or browser source?",
+				"OBS text sources have no alignment and no line height, so a multi-line list sits left-aligned with whatever spacing the font gives. This is a web page: Align aligns every line, and the styling is yours to set.\n\nGo with text sources if your OBS has no Browser source — the obs-websocket panel is built for that.",
 			},
 		)
 
@@ -131,11 +131,11 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 			Help_Step{
 				"Change the wording, if you want to",
-				"Text… on any row opens an editor. The value goes in as a placeholder — {killed}, {deaths}, {boss} and so on — and everything around it is yours: \"I have rekt {killed} of {total} bosses!\", emoji included.\n\nThe preview under the box shows it against your actual save, so you can see it before it goes anywhere near a stream. Click a placeholder to add it rather than typing the braces. Anything in braces that isn't a placeholder is left exactly as typed, so a mistake shows up in the preview instead of quietly vanishing.\n\nEmpty means the built-in wording, and Reset puts it back.\n\nSetting your own wording also drops the caption above that value on its page — having said what you want on screen, you don't want its name stacked on top.",
+				"Text… on any row opens an editor. The value goes in as a placeholder — {killed}, {deaths}, {boss} and so on — and everything around it is yours: \"I have rekt {killed} of {total} bosses!\", emoji included.\n\nThe preview under the box shows it against your actual save, so you can see it before it goes anywhere near a stream. Click a placeholder to add it rather than typing the braces. Anything in braces that isn't a placeholder is left exactly as typed, so a mistake shows up in the preview instead of quietly vanishing.\n\nEmpty means the built-in wording, and Reset puts it back.\n\nSetting your own wording also drops the caption above that value on its page. Add ?label=true to the page's URL to put it back.",
 			},
 			Help_Step{
 				"One wording, everywhere that value appears",
-				"The text you set is shared: the same value on the page, in the text file and on an obs-websocket source all read the same. Change Deaths here and deaths.txt changes with it.\n\nLists are the exception — Region bosses and the \"one per line\" files have no editor, because a list needs a wording per row rather than one for the whole thing.",
+				"The text you set is shared: the same value on the page, in the text file and on an obs-websocket source all read the same. Change Deaths here and deaths.txt changes with it.\n\nLists are the exception: Region bosses and the \"one per line\" files have no editor.",
 			},
 			Help_Step{
 				"Repeat for anything else you want",
@@ -158,8 +158,8 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 				"Host stays 127.0.0.1 if OBS is on this machine. Tick Remember the password to skip re-typing it — it's encrypted before it goes to disk, and tied to this machine, so a copied settings file is inert.",
 			},
 			Help_Step{
-				"Choose the scene — nothing happens until you do",
-				"Add to scene decides where the sources are created, and it's deliberately not optional. Until you pick one the app connects and creates nothing: dropping eight sources into whichever scene happened to be live is exactly the sort of thing you'd discover mid-stream.",
+				"Choose the scene",
+				"Add to scene is where the sources get created. Until you pick one the app connects and creates nothing.\n\nMade the scene in OBS after connecting? Press Refresh next to the picker and it will appear.",
 			},
 			Help_Step{
 				"Pick which values you want",
@@ -167,23 +167,23 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 			Help_Step{
 				"Style them from Appearance",
-				"Font, size, colour, bold and outline, set once and pushed to all of them. Doing it in OBS means opening eight property dialogs and setting the same thing eight times, and again every time you change your mind.\n\nOnly sent when you change something here, never during play, and only the part you changed: nudging the size doesn't resend the colour. So if you'd rather set one source's colour by hand in OBS, that survives everything except touching Colour on this panel."
+				"Font, size, colour, bold and outline, set once here and pushed to every source.\n\nOnly sent when you change something on this panel, never during play, and only the part you changed: nudging the size doesn't resend the colour. So a source you have coloured by hand in OBS keeps that colour until you touch Colour here."
 			},
 			Help_Step{
 				"Optionally, the overlay card too",
-				"If your OBS has Browser sources, \"Also send the overlay card\" creates one pointing at the overlay page and keeps it sized to the card, so you never have to type the dimensions in or drag the box out by eye.\n\nThat option only appears when OBS reports a Browser source — on the builds this panel exists for, there's nothing it could create.\n\nIt is resized whenever the card changes, so a size you set by hand won't stick. Untick it to take the source over yourself; it's hidden rather than deleted.",
+				"If your OBS has Browser sources, \"Also send the overlay card\" creates one pointing at the overlay page and keeps it sized to the card, so you never have to type the dimensions in or drag the box out by eye.\n\nThe option only appears if OBS reports a Browser source. No Browser source, no option.\n\nIt is resized whenever the card changes, so a size you set by hand won't stick. Untick it to take the source over yourself; it's hidden rather than deleted.",
 			},
 			Help_Step{
 				"Position them in OBS",
 				"That's never touched. New sources are stacked down the left so they don't land on top of each other; move and scale them however you like and the app won't move them again.\n\nUnticking hides a source rather than deleting it, because OBS has no undo for a deleted source.",
 			},
 			Help_Step{
-				"What isn't here, and why",
-				"Alignment. text_ft2_source_v2 — the text plugin on Linux — hasn't got any, so a control for it would work on Windows and silently do nothing for you. That gap is the reason the browser-source pages exist, where alignment is one CSS rule.\n\nLine height is the same story, which is why multi-line lists get the \"Blank line between entries\" option instead.",
+				"No alignment, no line height",
+				"Neither is offered here. text_ft2_source_v2, the text plugin on Linux, has no alignment setting at all, so a control for it would work on Windows and do nothing on Linux.\n\nFor line height, \"Blank line between entries\" opens a list up. For alignment, use the browser-source pages — it is one setting there.",
 			},
 			Help_Step{
 				"If you also have Browser sources",
-				"Then the Overlay card and Single values panels are the better styling story — real alignment, line height and colours. This panel exists for the builds where that isn't on the menu.\n\nIt's still worth connecting for one thing: it can create and size the overlay Browser source for you, which is the step above.",
+				"Use the Overlay card and Single values panels instead — real alignment, line height and colours, none of which a text source has.\n\nStill worth connecting for one thing: it can create and size the overlay Browser source for you, which is the step above.",
 			},
 		)
 
@@ -203,11 +203,11 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 			Help_Step{
 				"Change the wording, if you want to",
-				"Text… on any row opens an editor. The value goes in as a placeholder — {killed}, {deaths}, {boss} and so on — and everything around it is yours: \"I have rekt {killed} of {total} bosses!\", emoji included.\n\nThe preview under the box shows it against your actual save, so you can see it before it goes anywhere near a stream. Click a placeholder to add it rather than typing the braces. Anything in braces that isn't a placeholder is left exactly as typed, so a mistake shows up in the preview instead of quietly vanishing.\n\nEmpty means the built-in wording, and Reset puts it back.\n\nSetting your own wording also drops the caption above that value on its page — having said what you want on screen, you don't want its name stacked on top.",
+				"Text… on any row opens an editor. The value goes in as a placeholder — {killed}, {deaths}, {boss} and so on — and everything around it is yours: \"I have rekt {killed} of {total} bosses!\", emoji included.\n\nThe preview under the box shows it against your actual save, so you can see it before it goes anywhere near a stream. Click a placeholder to add it rather than typing the braces. Anything in braces that isn't a placeholder is left exactly as typed, so a mistake shows up in the preview instead of quietly vanishing.\n\nEmpty means the built-in wording, and Reset puts it back.\n\nSetting your own wording also drops the caption above that value on its page. Add ?label=true to the page's URL to put it back.",
 			},
 			Help_Step{
 				"One wording, everywhere that value appears",
-				"The text you set is shared: the same value on the page, in the text file and on an obs-websocket source all read the same. Change Deaths here and deaths.txt changes with it.\n\nLists are the exception — Region bosses and the \"one per line\" files have no editor, because a list needs a wording per row rather than one for the whole thing.",
+				"The text you set is shared: the same value on the page, in the text file and on an obs-websocket source all read the same. Change Deaths here and deaths.txt changes with it.\n\nLists are the exception: Region bosses and the \"one per line\" files have no editor.",
 			},
 			Help_Step{
 				"Position each one",
@@ -219,7 +219,7 @@ help_steps :: proc(topic: Help_Topic, allocator := context.temp_allocator) -> []
 			},
 			Help_Step{
 				"The caption above each value",
-				"\"DEATHS\" above the number, and so on — on by default, because a bare \"57\" on a stream tells a viewer nothing. Turn it off with \"Caption above each value\" if you're drawing your own labels in OBS.",
+				"\"DEATHS\" above the number, and so on — on by default. Turn it off with \"Caption above each value\" if you're drawing your own labels in OBS.",
 			},
 			Help_Step{
 				"Styling them",

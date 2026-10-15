@@ -958,7 +958,7 @@ view_obs_widgets :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		on_widget_labels, id = skald.hash_id(ID_WIDGET_LABELS),
 	))
 	append(&rows, paragraph(ctx,
-		"\"DEATHS\" above the number, and so on. Turn it off if you're drawing your own labels in OBS — but a bare number on its own says nothing to a viewer.\n\nThis is a separate line above the value, in its own style, and it only applies to these pages. It also steps aside for a value you have written your own wording for: having said what you want on screen, you don't want the value's name stacked on top of it.",
+		"\"DEATHS\" above the number, and so on. Turn it off if you're drawing your own labels in OBS.\n\nThis is a separate line above the value, in its own style, and it only applies to these pages. It also steps aside for any value you have written your own wording for — add ?label=true to that page's URL to keep it.",
 		th.color.fg_muted, th.font.size_xs,
 	))
 
@@ -1429,7 +1429,7 @@ view_obs_sources :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 			on_obsws_send_overlay, id = skald.hash_id(ID_WS_SEND_OVERLAY),
 		))
 		append(&rows, paragraph(ctx,
-			fmt.tprintf("Creates \"%s\" pointing at the overlay page and keeps it sized to the card, so the source box stays tight around what you can see instead of leaving dead space you have to drag out.", OBS_OVERLAY_SOURCE_NAME),
+			fmt.tprintf("Creates \"%s\" pointing at the overlay page and keeps it sized to the card, so the source box stays tight around what you can see.", OBS_OVERLAY_SOURCE_NAME),
 			th.color.fg_muted, th.font.size_xs,
 		))
 		if app.settings.obsws_send_overlay {
@@ -1463,7 +1463,7 @@ view_obs_sources :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	append(&rows, skald.spacer(th.spacing.sm))
 	append(&rows, skald.section_header(ctx, "Appearance"))
 	append(&rows, paragraph(ctx,
-		"Set here once and pushed to all of them, rather than opened and set eight times in OBS. Only ever sent when you change something on this panel — restyle a source in OBS and it stays that way until you touch a control here.",
+		"Set here once and pushed to all of them. Only ever sent when you change something on this panel — restyle a source in OBS and it stays that way until you touch a control here.",
 		th.color.fg_muted, th.font.size_xs,
 	))
 
