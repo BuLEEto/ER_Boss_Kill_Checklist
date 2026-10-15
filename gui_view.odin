@@ -149,6 +149,7 @@ ID_WS_PORT        :: "obs.ws_port"
 ID_WS_PASS        :: "obs.ws_pass"
 ID_WS_REMEMBER    :: "obs.ws_remember"
 ID_WS_SCENE       :: "obs.ws_scene"
+ID_WS_SCENE_REDO  :: "obs.ws_scene_refresh"
 ID_WS_ROOMY       :: "obs.ws_roomy"
 ID_WS_SEND_OVERLAY :: "obs.ws_send_overlay"
 ID_WS_FONT        :: "obs.ws_font"
@@ -1348,28 +1349,48 @@ view_obs_sources :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	scenes := obsws_scene_names()
 	chosen := app.settings.obsws_scene
 	append(&rows, skald.spacer(th.spacing.sm))
+	// Refresh beside the picker, not beside Connect. The list is only as
+	// fresh as the last connect, and a scene built in OBS after that won't
+	// be in it — which is a normal thing to do, since you go and make the
+	// scene the sources are for. Pressing Connect again has always
+	// re-read it, but nobody thinks to press Connect while connected, and
+	// they are looking at the dropdown, not at the password box.
 	append(&rows, skald.form_row(ctx, "Add to scene",
-		skald.select(
-			ctx, len(chosen) > 0 ? chosen : OBSWS_SCENE_NONE_LABEL, scenes, on_obsws_scene,
-			width = 280, placeholder = OBSWS_SCENE_NONE_LABEL,
-			id = skald.hash_id(ID_WS_SCENE),
+		skald.row(
+			skald.select(
+				ctx, len(chosen) > 0 ? chosen : OBSWS_SCENE_NONE_LABEL, scenes, on_obsws_scene,
+				width = 280, placeholder = OBSWS_SCENE_NONE_LABEL,
+				id = skald.hash_id(ID_WS_SCENE),
+			),
+			skald.button(
+				ctx, "Refresh", Msg(Obsws_Scenes_Refresh_Requested{}),
+				id = skald.hash_id(ID_WS_SCENE_REDO),
+				disabled = !app.settings.obsws_enabled,
+			),
+			spacing     = th.spacing.sm,
+			cross_align = .Center,
 		),
 		label_width = 120,
 	))
 	switch {
-	case len(scenes) == 0:
+	case len(scenes) == 0 && !app.settings.obsws_enabled:
 		append(&rows, paragraph(ctx,
 			"Connect and your scenes will be listed here. Nothing is created until you pick one.",
 			th.color.fg_muted, th.font.size_xs,
 		))
+	case len(scenes) == 0:
+		append(&rows, paragraph(ctx,
+			"No scenes yet. Press Refresh once the connection is up.",
+			th.color.fg_muted, th.font.size_xs,
+		))
 	case len(chosen) == 0:
 		append(&rows, paragraph(ctx,
-			"Pick the scene the sources should go in. Nothing is created until you do — otherwise they'd land in whichever scene happened to be live when the app connected, which is a nasty surprise if that was your Starting Soon scene.",
+			"Pick the scene the sources should go in. Nothing is created until you do.",
 			th.color.warning, th.font.size_xs,
 		))
 	case:
 		append(&rows, paragraph(ctx,
-			fmt.tprintf("New sources are created in %s. Change it and the app reconnects and adds them to the new scene; the copies in the old one are left alone.", chosen),
+			fmt.tprintf("New sources go in %s. Change it and they are added to the new scene; anything already in the old one stays where it is. Press Refresh after making a new scene in OBS.", chosen),
 			th.color.fg_muted, th.font.size_xs,
 		))
 	}

@@ -160,6 +160,7 @@ Obsws_Port_Draft :: distinct string
 Obsws_Pass_Draft :: distinct string
 Obsws_Remember_Set :: distinct bool
 Obsws_Connect_Requested :: struct {}
+Obsws_Scenes_Refresh_Requested :: struct {}
 Obsws_Scene_Selected :: distinct string
 Obsws_Send_Toggled :: struct { kind: Widget_Kind, on: bool }
 Obsws_Send_Overlay_Toggled :: distinct bool
@@ -272,6 +273,7 @@ Msg :: union {
 	Obsws_Pass_Draft,
 	Obsws_Remember_Set,
 	Obsws_Connect_Requested,
+	Obsws_Scenes_Refresh_Requested,
 	Obsws_Scene_Selected,
 	Obsws_Send_Toggled,
 	Obsws_Send_Overlay_Toggled,
@@ -608,6 +610,19 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		settings_set_string(&app.settings.obsws_password, out.obsws_pass_draft)
 		app.settings.obsws_enabled = true
 		app_save_settings()
+		return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
+
+	case Obsws_Scenes_Refresh_Requested:
+		// A reconnect, because that is the only way to ask OBS anything:
+		// once connected the reader thread owns the socket. It re-reads
+		// the scene list and re-checks the sources on the way through,
+		// which is what someone pressing this wants either way.
+		//
+		// Deliberately not Obsws_Connect_Requested, close as the two are:
+		// that one commits whatever is sitting in the host, port and
+		// password boxes, and a refresh shouldn't apply a half-typed port.
+		sync.guard(&app.mu)
+		if !app.settings.obsws_enabled do return out, {}
 		return out, skald.cmd_thread(Msg, obsws_connect_command(), obsws_connect_worker)
 
 	case Obsws_Scene_Selected:
