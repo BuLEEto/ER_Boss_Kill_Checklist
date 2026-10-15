@@ -28,6 +28,7 @@ APP_VERSION :: "2.1.6"
 
 main :: proc() {
 	change_to_exe_dir()
+	debug_init()
 
 	bst, bst_ok := load_bst_map("eventflag_bst.txt")
 	if !bst_ok {

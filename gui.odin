@@ -416,6 +416,7 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		return out, skald.cmd_delay(f32(app.settings.poll_seconds), Msg(Tick{}))
 
 	case Save_Dialog_Opened:
+		debug_log("dialog OPENED")
 		out.save_dialog_open = true
 		// Rescan on open so a character made since the last look shows up.
 		// It's ~100 ms and it runs on a worker, so there's no reason to
@@ -425,9 +426,11 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		return out, skald.cmd_thread_simple(Msg, scan_worker)
 
 	case Save_Dialog_Closed:
+		debug_log("dialog CLOSED (dismissed)")
 		out.save_dialog_open = false
 
 	case Save_Character_Picked:
+		debug_log("Save_Character_Picked: save=%d slot=%d (dialog_open=%v)", v.save, v.slot, out.save_dialog_open)
 		if v.save < 0 || v.save >= len(out.scan_results) do return out, {}
 		out = gui_apply_save(out, out.scan_results[v.save].path, v.slot)
 
@@ -437,12 +440,14 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		return out, skald.cmd_thread_simple(Msg, scan_worker)
 
 	case Scan_Done:
+		debug_log("Scan_Done: %d saves (dialog_open=%v)", len(v.saves), out.save_dialog_open)
 		out.scanning = false
 		out.scan_ran = true
 		free_found_saves(out.scan_results)
 		out.scan_results = v.saves
 
 	case Scan_Result_Picked:
+		debug_log("Scan_Result_Picked: idx=%d", int(v))
 		idx := int(v)
 		if idx < 0 || idx >= len(out.scan_results) do return out, {}
 		out = gui_apply_save(out, out.scan_results[idx].path, -1)
@@ -470,6 +475,7 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 
 	case Slot_Selected:
 		sync.guard(&app.mu)
+		debug_log("Slot_Selected(%d) from the Setup dropdown", int(v))
 		app_set_active_slot(int(v))
 		app_save_settings()
 		out = gui_sync_expanded(out)
@@ -477,6 +483,7 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 
 	case Boss_List_Selected:
 		sync.guard(&app.mu)
+		debug_log("Boss_List_Selected(%s); slot is %d", string(v), app.settings.active_slot)
 		if app_set_boss_list(boss_list_from_name(string(v))) {
 			app_save_settings()
 			out = gui_sync_expanded(out)
@@ -1056,6 +1063,7 @@ gui_apply_save :: proc(s: Gui, path: string, slot: int) -> Gui {
 		return gui_toast(out, app.save_error, .Danger)
 	}
 
+	debug_log("gui_apply_save: path=%s requested slot=%d", path, slot)
 	chosen := slot
 	if chosen < 0 {
 		active := 0
@@ -1071,6 +1079,7 @@ gui_apply_save :: proc(s: Gui, path: string, slot: int) -> Gui {
 		app_set_active_slot(chosen)
 		app_save_settings()
 		out = gui_after_data_change(out)
+		debug_log("  -> dialog closed by the pick")
 		out.save_dialog_open = false
 
 		// Only sweep the user to the checklist when they had nothing set
@@ -1225,7 +1234,12 @@ apply_poll_result :: proc(s: Gui, r: Poll_Done) -> Gui {
 	// active_slot points at a slot in the new one — the user picks a
 	// character and the app shows a different one. Drop it; gui_apply_save
 	// has already zeroed last_mtime, so the next tick reads the new file.
+	debug_log(
+		"poll result: ok=%v unchanged=%v mtime=%d for %s (current %s)",
+		r.ok, r.unchanged, r.mtime, r.path, app.settings.save_path,
+	)
 	if len(r.path) > 0 && r.path != app.settings.save_path {
+		debug_log("  -> DISCARDED, poll was for a different save")
 		delete(r.path)
 		delete(r.data)
 		delete(r.err)
@@ -1264,6 +1278,7 @@ apply_poll_result :: proc(s: Gui, r: Poll_Done) -> Gui {
 
 	free_character_slots(app.slots)
 	app.slots = get_character_slots(&app.save_file)
+	debug_log("  -> applied; app.slots replaced from %s", app.settings.save_path)
 	app_update_boss_status()
 
 	changed := app.death_count != old_deaths

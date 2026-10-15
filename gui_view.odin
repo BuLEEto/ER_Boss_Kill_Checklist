@@ -280,6 +280,26 @@ view_setup :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 view_save_dialog :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 	th := ctx.theme
 
+	// Closed: build the shell and nothing else.
+	//
+	// The content used to be built either way, and its character rows went on
+	// taking clicks after the dialog was dismissed — seconds later, with
+	// nothing on screen. Picking a character closed the dialog, and the next
+	// click anywhere near where a row had been was read as picking a
+	// different character out of a save the user had just moved away from.
+	// Reported as "changing the save file then clicking the boss list resets
+	// my character", and that is exactly what it did.
+	//
+	// Still returns a dialog rather than nothing, like the other two here: it
+	// animates its own dismissal, and a view that vanishes outright takes the
+	// animation with it.
+	if !s.save_dialog_open {
+		return skald.dialog(
+			ctx, open = false, on_dismiss = on_save_dialog_closed,
+			content = skald.spacer(0),
+		)
+	}
+
 	body: skald.View
 	switch {
 	case s.scanning:

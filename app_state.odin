@@ -382,6 +382,7 @@ app_apply_settings :: proc(s: Settings) {
 }
 
 app_set_save_path :: proc(path: string) {
+	debug_log("save path <- %s (was %s, slot %d)", path, app.settings.save_path, app.settings.active_slot)
 	settings_set_string(&app.settings.save_path, path)
 	// A new file means the old slot index is meaningless.
 	app.settings.active_slot = -1
@@ -389,6 +390,7 @@ app_set_save_path :: proc(path: string) {
 }
 
 app_set_active_slot :: proc(slot: int) {
+	debug_log("active_slot <- %d (was %d)", slot, app.settings.active_slot)
 	app.settings.active_slot = slot
 	app_update_boss_status()
 
