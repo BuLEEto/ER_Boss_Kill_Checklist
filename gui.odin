@@ -1090,7 +1090,11 @@ gui_apply_save :: proc(s: Gui, path: string, slot: int) -> Gui {
 		if was_unconfigured {
 			out.tab = .Checklist
 		}
-		return gui_toast(out, fmt.tprintf("Tracking %s", app.slots[chosen].name), .Success)
+		// No toast. The dialog closes onto a Setup tab whose Character row
+		// now reads the name you just clicked, or onto the Checklist with
+		// that character in its header — the screen has already said it, and
+		// saying it again in a popup is one more thing to wait out.
+		return out
 	}
 
 	out.save_dialog_open = false
