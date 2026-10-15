@@ -16,6 +16,15 @@ import "core:testing"
 // directly instead.
 // ============================================================================
 
+// settings.save_path is heap-owned — settings_set_string deletes it before
+// replacing it. Assigning a literal would arm a free() of .rodata for any
+// later test that reached app_set_save_path, so these clone it too.
+@(private = "file")
+set_current_save :: proc(path: string) {
+	delete(app.settings.save_path)
+	app.settings.save_path = strings.clone(path)
+}
+
 @(private = "file")
 done :: proc(path: string, mtime: i64) -> Poll_Done {
 	// Heap-allocated: apply_poll_result owns and frees these.
@@ -24,7 +33,7 @@ done :: proc(path: string, mtime: i64) -> Poll_Done {
 
 @(test)
 a_poll_for_another_save_is_discarded :: proc(t: ^testing.T) {
-	app.settings.save_path = "/saves/B.sl2"
+	set_current_save("/saves/B.sl2")
 
 	s: Gui
 	s.last_mtime = 999
@@ -39,7 +48,7 @@ a_poll_for_another_save_is_discarded :: proc(t: ^testing.T) {
 
 @(test)
 a_poll_for_the_current_save_is_accepted :: proc(t: ^testing.T) {
-	app.settings.save_path = "/saves/B.sl2"
+	set_current_save("/saves/B.sl2")
 
 	s: Gui
 	s.last_mtime = 999
@@ -57,7 +66,7 @@ a_result_with_no_path_is_still_accepted :: proc(t: ^testing.T) {
 	// Defensive: nothing should produce one now, but an empty path must
 	// mean "unknown, let it through" rather than silently dropping every
 	// poll if a future return path forgets to stamp it.
-	app.settings.save_path = "/saves/B.sl2"
+	set_current_save("/saves/B.sl2")
 
 	s: Gui
 	s.last_mtime = 999

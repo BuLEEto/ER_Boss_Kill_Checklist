@@ -123,4 +123,9 @@ if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
 fi
 echo "  * build the Windows zip on a Windows machine (see BUILD.md)"
 echo "  * both the .deb and the .tar.gz carry SDL3, so neither needs a system one"
-echo "  * the .7z is the same Linux build, for Nexus — it won't take a bare .tar.gz"
+if [ -n "${SEVENZ_FILE:-}" ]; then
+    # Named explicitly: there are two .7z files here, and the other one wraps
+    # the .deb. Uploading that to Nexus ships a nested archive, which is the
+    # rejection reason this one exists to avoid.
+    echo "  * for Nexus upload ${SEVENZ_FILE} — it won't take a bare .tar.gz"
+fi
