@@ -19,6 +19,12 @@ import "core:testing"
 // settings.save_path is heap-owned — settings_set_string deletes it before
 // replacing it. Assigning a literal would arm a free() of .rodata for any
 // later test that reached app_set_save_path, so these clone it too.
+//
+// The clone is deliberately never freed, and the runner's 12-byte leak
+// report against this line is expected. The tests run in parallel and all
+// three read this one global, which only works because they all set it to
+// the same path; a free at the end of one would be a free underneath
+// another. A leak that dies with the process beats a flaky suite.
 @(private = "file")
 set_current_save :: proc(path: string) {
 	delete(app.settings.save_path)

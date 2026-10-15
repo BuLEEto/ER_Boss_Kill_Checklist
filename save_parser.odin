@@ -21,6 +21,11 @@ EVENT_FLAGS_SIZE :: 0x1BF99F
 FLAG_DIVISOR     :: 1000
 BLOCK_SIZE       :: 125
 
+// An Elden Ring save holds twelve entries: ten character slots plus the two
+// USER_DATA blocks. The cap is well clear of that and exists only so that a
+// corrupt header can't be believed — see parse_save_bytes.
+BND4_MAX_ENTRIES :: 64
+
 // ProfileSummary location within USER_DATA_10
 PROFILE_SUMMARY_OFFSET :: 0x1964
 PROFILE_ENTRY_SIZE     :: 0x24C
@@ -131,8 +136,30 @@ parse_save_bytes :: proc(path: string, raw: []u8, allocator := context.allocator
 		return save, false
 	}
 
-	// Read file count from header offset 0x0C
-	save.file_count = read_u32_le(raw, 0x0C)
+	// Read file count from header offset 0x0C.
+	//
+	// This is four bytes of someone else's file and it sizes an allocation,
+	// so it is checked before it is trusted. A save truncated mid-write, or
+	// corrupted by the game (which happens, and is what people reach for a
+	// tracker to confirm), can put anything here. 0xFFFFFFFF asks for a
+	// 103 GB entry table; the allocator declines, and the loop below then
+	// writes to a slice that isn't there. Measured without these two
+	// checks, that is an Illegal_Instruction trap — the app vanishes on a
+	// bad save rather than saying the save is bad.
+	//
+	// Two bounds, because either alone lets something silly through: the
+	// count has to be plausible for a save file, and the entry headers it
+	// claims have to actually fit inside the bytes we were given.
+	count := read_u32_le(raw, 0x0C)
+	if count == 0 || count > BND4_MAX_ENTRIES {
+		fmt.eprintfln("BND4 header claims %d entries — not a save file we can read", count)
+		return save, false
+	}
+	if BND4_HEADER_SIZE + int(count) * ENTRY_HEADER_SIZE > len(raw) {
+		fmt.eprintln("BND4 entry table runs past the end of the file")
+		return save, false
+	}
+	save.file_count = count
 
 	// Parse entry headers (start at 0x40, 32 bytes each)
 	save.entries = make([]BND4_Entry, save.file_count, allocator)
@@ -146,6 +173,27 @@ parse_save_bytes :: proc(path: string, raw: []u8, allocator := context.allocator
 	}
 
 	return save, true
+}
+
+// The byte range one entry covers, or ok = false when the header's
+// offset and size don't describe a range inside the file.
+//
+// entry_size is a u64 straight off disk. Casting a huge one to int gives a
+// negative, which sails through a `start + size > len(raw)` test and then
+// slices [start:end] with end < start — a bounds panic rather than the
+// "this save is unreadable" the caller is equipped to report. Checked in
+// one place so every reader gets the same answer.
+@(private = "file")
+entry_bounds :: proc(save: ^Save_File, index: int) -> (start, end: int, ok: bool) {
+	if index < 0 || index >= int(save.file_count) do return 0, 0, false
+
+	entry := save.entries[index]
+	if entry.entry_size > u64(len(save.raw_data)) do return 0, 0, false
+
+	start = int(entry.data_offset)
+	end = start + int(entry.entry_size)
+	if start < 0 || end < start || end > len(save.raw_data) do return 0, 0, false
+	return start, end, true
 }
 
 close_save_file :: proc(save: ^Save_File, allocator := context.allocator) {
@@ -170,14 +218,12 @@ get_character_slots :: proc(save: ^Save_File, allocator := context.allocator) ->
 	}
 
 	// USER_DATA_10 is entry index 10
-	ud10_entry := save.entries[10]
-	ud10_start := int(ud10_entry.data_offset)
-	ud10_size := int(ud10_entry.entry_size)
-
-	if ud10_start + ud10_size > len(save.raw_data) {
+	ud10_start, ud10_end, ud10_ok := entry_bounds(save, 10)
+	if !ud10_ok {
 		fmt.eprintln("USER_DATA_10 out of bounds")
 		return nil
 	}
+	ud10_size := ud10_end - ud10_start
 
 	ud10 := save.raw_data[ud10_start:]
 
@@ -397,11 +443,11 @@ get_slot_event_flags :: proc(save: ^Save_File, slot_index: int, bst: BST_Map) ->
 	if slot_index < 0 || slot_index >= SLOT_COUNT do return nil, -1
 	if int(save.file_count) <= slot_index do return nil, -1
 
-	entry := save.entries[slot_index]
-	start := int(entry.data_offset) + CHECKSUM_SIZE  // skip MD5 checksum
-	end := int(entry.data_offset) + int(entry.entry_size)
+	entry_start, end, ok := entry_bounds(save, slot_index)
+	if !ok do return nil, -1
 
-	if end > len(save.raw_data) do return nil, -1
+	start := entry_start + CHECKSUM_SIZE  // skip MD5 checksum
+	if start > end do return nil, -1
 
 	slot_data := save.raw_data[start:end]
 	ef_off := find_event_flags_offset(slot_data, bst)
@@ -421,11 +467,11 @@ get_death_count :: proc(save: ^Save_File, slot_index: int, ef_offset: int) -> u3
 	if slot_index < 0 || slot_index >= SLOT_COUNT do return 0
 	if ef_offset < 30 do return 0
 
-	entry := save.entries[slot_index]
-	start := int(entry.data_offset) + CHECKSUM_SIZE
-	end := int(entry.data_offset) + int(entry.entry_size)
+	entry_start, end, ok := entry_bounds(save, slot_index)
+	if !ok do return 0
 
-	if end > len(save.raw_data) do return 0
+	start := entry_start + CHECKSUM_SIZE
+	if start > end do return 0
 
 	slot_data := save.raw_data[start:end]
 
