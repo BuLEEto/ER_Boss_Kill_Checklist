@@ -244,8 +244,17 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 
 	focus_region := parse_int_default(region_param, -1)
 
-	next_count := parse_int_default(count_param, app.settings.overlay_next_count)
-	if next_count < 1 do next_count = 8
+	// Clamped to the same ceiling as the setting, not just floored. This
+	// number is a capacity reserve in app_next_bosses, so it is a request
+	// for memory straight from a URL: ?count=200000000 measured a 9.6 GB
+	// jump in the process's peak address space, returning 200 all the
+	// while because nothing ever touches the pages. Harmless on a desktop
+	// with overcommit, not harmless where overcommit is off or a cgroup
+	// limit applies — and the server listens on the LAN for the phone
+	// page, so the URL isn't only ours to write.
+	next_count := clamp(
+		parse_int_default(count_param, app.settings.overlay_next_count), 1, 50,
+	)
 
 	total, killed := count_bosses(app.regions)
 	slot_name, slot_level := app_active_character()
