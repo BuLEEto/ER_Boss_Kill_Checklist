@@ -141,6 +141,9 @@ shutdown :: proc() {
 	obsws_disconnect()
 	server_stop(&app.server)
 	if app.save_loaded do close_save_file(&app.save_file)
+	// Unconditional, not app_flush_settings: this is the last chance to
+	// write, and a clean exit should leave the file matching the session
+	// whether or not anything marked itself deferred.
 	app_save_settings()
 }
 

@@ -401,6 +401,13 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		app_save_settings()
 
 	case Tick:
+		// The tick is the one thing that runs whatever else is happening,
+		// so it's where a deferred settings write lands. No lock: this
+		// only reads app.settings, the GUI thread is its only writer, and
+		// taking the write lock would park the HTTP workers for the length
+		// of a disk write.
+		app_flush_settings()
+
 		// Nothing to poll, or a poll is already in flight — just come
 		// back later.
 		if out.poll_busy || len(app.settings.save_path) == 0 || app.settings.active_slot < 0 {
@@ -1035,7 +1042,7 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		app.settings.window_w         = int(out.win.size.x)
 		app.settings.window_h         = int(out.win.size.y)
 		app.settings.window_maximized = out.win.maximized
-		app_save_settings()
+		app_touch_settings()
 	}
 
 	return out, {}
@@ -1344,15 +1351,15 @@ apply_poll_result :: proc(s: Gui, r: Poll_Done) -> Gui {
 	}
 	app.session_bosses += newly_killed
 
-	settings_dirty := best_count > 0 && app_note_kill_region(best_region)
+	needs_save := best_count > 0 && app_note_kill_region(best_region)
 
 	// A kill is what the attempts counter measures from. Rebase before the
 	// write below so the region note and the new bookmark land together.
 	if newly_killed > 0 {
 		app_reset_attempts()
-		settings_dirty = true
+		needs_save = true
 	}
-	if settings_dirty do app_save_settings()
+	if needs_save do app_save_settings()
 
 	if !changed do return out
 

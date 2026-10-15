@@ -70,6 +70,11 @@ App_State :: struct {
 	// rather than breaking "app.mu is only ever written from the GUI".
 	overlay_size:    Overlay_Size,
 	overlay_size_mu: sync.Mutex,
+
+	// Set by a change that shouldn't pay for a file write of its own —
+	// window geometry, which arrives once a frame all through a drag.
+	// app_flush_settings writes it out on the next poll tick.
+	settings_dirty: bool,
 }
 
 // What the overlay card measures at when nothing constrains its width.
@@ -443,7 +448,27 @@ app_reset_session :: proc() {
 // Persist the current settings, reporting failure rather than swallowing
 // it the way the old build did.
 app_save_settings :: proc() {
+	app.settings_dirty = false
 	if err := save_settings_file(app.settings); err != nil {
 		fmt.eprintfln("Could not write settings: %v", err)
 	}
+}
+
+// Note a change without writing the file yet.
+//
+// Window geometry is the one setting that changes continuously: Skald
+// reports a new state on every frame where it differs, so each step of a
+// resize was its own marshal-write-rename of the settings file. Sixteen
+// scripted resize steps measured seventeen writes; a hand-held drag
+// reports once a frame for as long as it lasts. Everything else is a
+// discrete click and saves immediately.
+app_touch_settings :: proc() {
+	app.settings_dirty = true
+}
+
+// Write out a deferred change. Called from the poll tick, so geometry is
+// durable within a poll interval, and from shutdown.
+app_flush_settings :: proc() {
+	if !app.settings_dirty do return
+	app_save_settings()
 }
