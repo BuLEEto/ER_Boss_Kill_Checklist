@@ -886,15 +886,22 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		app_save_settings()
 		out = gui_after_data_change(out)
 
+	// Both of these change what the outputs say, so both have to push it.
+	// Without that the setting saves, the app's own preview updates, and the
+	// OBS text source carries on showing the old list until something else
+	// happens to refresh it — unticking and reticking the source, or a boss
+	// dying. The browser pages reload over SSE for the same reason.
 	case Overlay_Count_Changed:
 		sync.guard(&app.mu)
 		app.settings.overlay_next_count = clamp(int(v), 1, 50)
 		app_save_settings()
+		out = gui_after_data_change(out)
 
 	case Region_Max_Changed:
 		sync.guard(&app.mu)
 		app.settings.region_bosses_max = clamp(int(v), 1, 50)
 		app_save_settings()
+		out = gui_after_data_change(out)
 
 	case Look_Accent_Set:
 		sync.guard(&app.mu)
