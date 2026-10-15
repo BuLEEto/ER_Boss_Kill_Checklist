@@ -108,6 +108,13 @@ Poll_Done :: struct {
 	data:      []u8, // heap; owned by update
 	mtime:     i64,
 	err:       string, // heap; owned by update
+
+	// Which file these bytes came from. A poll can still be reading when
+	// the user picks a different save, and without this the result lands
+	// anyway: the old file's characters replace app.slots while
+	// active_slot still points at the slot they chose in the new one, and
+	// the app silently shows a different character. Heap; owned by update.
+	path: string,
 }
 
 Save_Dialog_Opened :: struct {}
@@ -1145,22 +1152,32 @@ Poll_Params :: struct {
 poll_worker :: proc(p: Poll_Params) -> Msg {
 	defer delete(p.path)
 
+	// Cloned per return rather than once, because `path` is owned by update
+	// and each Poll_Done is freed separately.
 	fi, stat_err := os.stat(p.path, context.temp_allocator)
 	if stat_err != nil {
-		return Poll_Done{err = strings.clone("Save file is no longer readable")}
+		return Poll_Done{
+			err  = strings.clone("Save file is no longer readable"),
+			path = strings.clone(p.path),
+		}
 	}
 
 	mtime := fi.modification_time._nsec
 	if mtime == p.last_mtime {
 		// Untouched since last look — skip the 25 MB read.
-		return Poll_Done{ok = true, unchanged = true, mtime = mtime}
+		return Poll_Done{
+			ok = true, unchanged = true, mtime = mtime, path = strings.clone(p.path),
+		}
 	}
 
 	data, read_err := os.read_entire_file(p.path, context.allocator)
 	if read_err != nil {
-		return Poll_Done{err = strings.clone("Could not read the save file")}
+		return Poll_Done{
+			err  = strings.clone("Could not read the save file"),
+			path = strings.clone(p.path),
+		}
 	}
-	return Poll_Done{ok = true, data = data, mtime = mtime}
+	return Poll_Done{ok = true, data = data, mtime = mtime, path = strings.clone(p.path)}
 }
 
 scan_worker :: proc() -> Msg {
@@ -1202,6 +1219,19 @@ free_found_saves :: proc(saves: []Found_Save) {
 // Merge a completed poll back into shared state.
 apply_poll_result :: proc(s: Gui, r: Poll_Done) -> Gui {
 	out := s
+
+	// Stale: the save was changed while this poll was in flight. Applying
+	// it would put the old file's characters into app.slots while
+	// active_slot points at a slot in the new one — the user picks a
+	// character and the app shows a different one. Drop it; gui_apply_save
+	// has already zeroed last_mtime, so the next tick reads the new file.
+	if len(r.path) > 0 && r.path != app.settings.save_path {
+		delete(r.path)
+		delete(r.data)
+		delete(r.err)
+		return out
+	}
+	delete(r.path)
 
 	if !r.ok {
 		if len(r.err) > 0 {
