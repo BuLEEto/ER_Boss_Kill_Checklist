@@ -230,9 +230,14 @@ widget_facts :: proc(region: Region_Choice, next_count: int) -> (f: Widget_Facts
 		f.region_total, f.region_killed = count_region_bosses(r)
 		f.has_region = true
 
+		// Capped: an uncapped list is as long as the area, which is more
+		// than fits in a source anyone wants on screen.
+		max := app.settings.region_bosses_max
 		left := make([dynamic]string, context.temp_allocator)
 		for &b in r.bosses {
-			if !b.killed do append(&left, b.boss)
+			if b.killed do continue
+			if max > 0 && len(left) >= max do break
+			append(&left, b.boss)
 		}
 		f.region_bosses = left[:]
 	}

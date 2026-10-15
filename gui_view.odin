@@ -1809,6 +1809,7 @@ on_overlay_bg :: proc(i: int) -> Msg {
 }
 
 on_overlay_count :: proc(v: f32) -> Msg { return Overlay_Count_Changed(int(v + 0.5)) }
+on_region_max :: proc(v: f32) -> Msg { return Region_Max_Changed(int(v + 0.5)) }
 
 on_roomy_lines :: proc(v: bool) -> Msg { return Roomy_Lines_Set(v) }
 

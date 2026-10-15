@@ -221,6 +221,7 @@ Look_Reset :: struct { target: Look_Target }
 Roomy_Lines_Set :: distinct bool
 
 Overlay_Count_Changed :: distinct int
+Region_Max_Changed :: distinct int
 Copy_Requested :: distinct string
 
 
@@ -303,6 +304,7 @@ Msg :: union {
 	Overlay_Mode_Selected,
 	Overlay_Bg_Selected,
 	Overlay_Count_Changed,
+	Region_Max_Changed,
 	Region_Selected,
 	Look_Accent_Set,
 	Look_Text_Set,
@@ -887,6 +889,11 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 	case Overlay_Count_Changed:
 		sync.guard(&app.mu)
 		app.settings.overlay_next_count = clamp(int(v), 1, 50)
+		app_save_settings()
+
+	case Region_Max_Changed:
+		sync.guard(&app.mu)
+		app.settings.region_bosses_max = clamp(int(v), 1, 50)
 		app_save_settings()
 
 	case Look_Accent_Set:

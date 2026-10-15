@@ -180,6 +180,24 @@ view_region_control :: proc(ctx: ^skald.Ctx(Msg), t: Region_Target, id_key: stri
 		label_width = 120,
 	))
 	append(&rows, paragraph(ctx, region_choice_hint(t), th.color.fg_muted, th.font.size_xs))
+
+	// The cap on a region boss list. One setting, shown on every panel that
+	// lists them, because this is a statement about how long a list should be
+	// rather than about one of the four places it appears — and you want to
+	// find it on whichever panel sent you looking for it.
+	append(&rows, skald.form_row(ctx,
+		fmt.tprintf("At most %d bosses", app.settings.region_bosses_max),
+		skald.slider(
+			ctx, f32(app.settings.region_bosses_max), on_region_max,
+			min_value = 1, max_value = 50, step = 1, width = 220,
+			id = skald.hash_id(fmt.tprintf("%s.max", id_key)),
+		),
+		label_width = 120,
+	))
+	append(&rows, paragraph(ctx,
+		"How far a region's boss list runs before it stops. An area can hold twenty-five, which is longer than any source you'd want on screen. Shared by the overlay card, the single-value page, region_bosses.txt and the OBS source — set it once.",
+		th.color.fg_muted, th.font.size_xs,
+	))
 	return rows[:]
 }
 

@@ -69,7 +69,8 @@ POLL_SECONDS_DEFAULT :: 5
 //  11  the obs-websocket text sources get a look of their own
 //  12  the overlay card can be sent to OBS as a Browser source
 //  13  per-value custom text for the OBS values
-SETTINGS_VERSION :: 13
+//  14  a cap on how many bosses a region list shows
+SETTINGS_VERSION :: 14
 
 // Which region an integration follows. One of these per integration
 // rather than one shared between them: the OBS tab has a panel per
@@ -211,6 +212,16 @@ Settings :: struct {
 	// Overlay defaults, mirrored into the URL the OBS tab hands out
 	overlay_mode:       string `json:"overlay_mode"`,       // summary | next | region
 	overlay_next_count: int    `json:"overlay_next_count"`,
+
+	// How many bosses a region list will show before it stops.
+	//
+	// Unbounded, this is as long as the area: Liurnia is 25 and early on
+	// none of them are dead, which is more than fits in any source anyone
+	// wants on screen. Shared by every output that lists them — the overlay
+	// card in region mode, the single-value page, region_bosses.txt and the
+	// obs-websocket source — because it is a statement about how long a list
+	// should be, not about one of the places it appears.
+	region_bosses_max: int `json:"region_bosses_max"`,
 	overlay_bg:         string `json:"overlay_bg"`,         // none | green | magenta
 
 	// The card's own backing. "panel" is the dark rounded box; "none"
@@ -394,6 +405,7 @@ default_settings :: proc() -> Settings {
 
 		overlay_mode        = "summary",
 		overlay_next_count  = 8,
+		region_bosses_max   = 20,
 		overlay_bg          = "none",
 		overlay_card        = "panel",
 
@@ -855,6 +867,7 @@ settings_apply_bounds :: proc(s: ^Settings) {
 	}
 	if s.server_port < 1 || s.server_port > 65535 do s.server_port = 3000
 	if s.overlay_next_count < 1 || s.overlay_next_count > 50 do s.overlay_next_count = 8
+	if s.region_bosses_max < 1 || s.region_bosses_max > 50 do s.region_bosses_max = 20
 
 	switch s.overlay_mode {
 	case "summary", "next", "region": // fine

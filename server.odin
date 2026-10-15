@@ -278,9 +278,13 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 
 	bosses := make([dynamic]Overlay_Boss_View, context.temp_allocator)
 	if mode == "region" && focus_region >= 0 && focus_region < len(app.regions) {
+		// The card builds its own list rather than going through
+		// widget_facts, so the same cap has to be applied here too.
+		max := app.settings.region_bosses_max
 		r := &app.regions[focus_region]
 		for &b in r.bosses {
 			if b.killed do continue
+			if max > 0 && len(bosses) >= max do break
 			append(&bosses, Overlay_Boss_View{
 				boss = b.boss, place = b.place, region_name = r.region_name,
 			})
