@@ -243,6 +243,7 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 	body_class := strings.join(classes[:], " ", context.temp_allocator)
 
 	focus_region := parse_int_default(region_param, -1)
+
 	next_count := parse_int_default(count_param, app.settings.overlay_next_count)
 	if next_count < 1 do next_count = 8
 
@@ -437,7 +438,17 @@ handle_sse :: proc(req: ^http.Request, res: ^http.Response) {
 		ping_countdown -= 1
 		if ping_countdown > 0 do continue
 		ping_countdown = 15
-		if !http.sse_comment(res, "ping") do break
+		// Under sse_mutex, same as the broadcasts: this writes to the
+		// same socket they do. Both go out through _send_all, which loops
+		// on a partial write — so an unguarded ping landing mid-event
+		// splices a `:ping` into the middle of a `data:` line and the
+		// overlay drops that update. Only reachable when a client is slow
+		// enough to fill the send buffer, which is exactly the OBS source
+		// sitting on an inactive scene.
+		sync.mutex_lock(&app.sse_mutex)
+		alive := http.sse_comment(res, "ping")
+		sync.mutex_unlock(&app.sse_mutex)
+		if !alive do break
 	}
 
 	sync.mutex_lock(&app.sse_mutex)
