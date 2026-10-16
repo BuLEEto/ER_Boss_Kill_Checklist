@@ -194,6 +194,20 @@ Overlay_Region_Summary :: struct {
 	is_complete:   bool,
 }
 
+// A query flag overrides the setting when it's present, either way —
+// the same shape as mode, bg and align below.
+//
+// These three used to be OR'd with the setting instead, which could only
+// ever force one on. overlay_url_string put deaths=true in the URL it
+// hands you, so once that URL was in OBS, unticking "Include death
+// count" did nothing and deaths=false did nothing either. The builder no
+// longer writes the parameter, and this makes it work both ways for the
+// URLs already out there.
+@(private = "file")
+query_flag :: proc(param: string, setting: bool) -> bool {
+	return len(param) > 0 ? http.form_bool(param) : setting
+}
+
 handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 	tpl := app.tpl_overlay
 	if tpl == nil {
@@ -211,13 +225,13 @@ handle_overlay :: proc(req: ^http.Request, res: ^http.Response) {
 	sync.shared_guard(&app.mu)
 
 	mode := len(mode_param) > 0 ? mode_param : app.settings.overlay_mode
-	show_deaths := app.settings.show_deaths || deaths_param == "true"
+	show_deaths := query_flag(deaths_param, app.settings.show_deaths)
 
 	attempts_param, _ := http.request_query(req, "attempts")
 	session_param, _ := http.request_query(req, "session")
 	attempts, has_attempts := app_attempts()
-	show_attempts := (app.settings.show_attempts || attempts_param == "true") && has_attempts
-	show_session := app.settings.show_session || session_param == "true"
+	show_attempts := query_flag(attempts_param, app.settings.show_attempts) && has_attempts
+	show_session := query_flag(session_param, app.settings.show_session)
 
 	// Rendered into <body class="...">, rather than left to the page's JS
 	// to add on load. The overlay reloads itself on every kill, so a

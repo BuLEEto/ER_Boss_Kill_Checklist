@@ -1695,9 +1695,12 @@ overlay_url_string :: proc(allocator := context.allocator) -> string {
 	if app.settings.browser_look.align != "left" {
 		fmt.sbprintf(&b, "&align=%s", app.settings.browser_look.align)
 	}
-	if app.settings.show_deaths {
-		strings.write_string(&b, "&deaths=true")
-	}
+	// No deaths/attempts/session parameter. They have no pinned-vs-auto
+	// split to capture, so writing one only freezes the checkbox out of
+	// its own setting — tick the box after copying the URL and the card
+	// would ignore you. Same reasoning as the automatic region modes
+	// above. A hand-written ?deaths=true or ?deaths=false still wins, for
+	// a second source that should differ from the panel.
 	return strings.to_string(b)
 }
 
