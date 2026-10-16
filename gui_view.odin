@@ -741,7 +741,13 @@ view_obs_browser :: proc(s: Gui, ctx: ^skald.Ctx(Msg)) -> skald.View {
 		))
 	}
 
-	for v in view_region_control(ctx, .Browser, "browser.region") do append(&rows, v)
+	// Region mode is the only one that lists a region's bosses: Summary
+	// lists areas and their counts, Next up runs on its own count above.
+	// Shown in all three, the Region picker and the cap below it look like
+	// settings that aren't taking — which is how they were reported.
+	if app.settings.overlay_mode == "region" {
+		for v in view_region_control(ctx, .Browser, "browser.region") do append(&rows, v)
+	}
 
 	if app.settings.overlay_mode == "summary" {
 		append(&rows, skald.checkbox(
