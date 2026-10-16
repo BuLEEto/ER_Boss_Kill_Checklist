@@ -1301,6 +1301,11 @@ apply_poll_result :: proc(s: Gui, r: Poll_Done) -> Gui {
 	sync.guard(&app.mu)
 
 	old_deaths := app.death_count
+	// Levelling up changes nothing else the diff below looks at, so without
+	// this the overlay and the text files keep the old level until a death
+	// or a boss kill happens to push them. Reads app.slots, so it has to be
+	// taken before get_character_slots replaces them.
+	_, old_level := app_active_character()
 	old_killed := make(map[u32]bool, 512, context.temp_allocator)
 	for &reg in app.regions {
 		for &b in reg.bosses do old_killed[b.flag_id] = b.killed
@@ -1321,7 +1326,8 @@ apply_poll_result :: proc(s: Gui, r: Poll_Done) -> Gui {
 	debug_log("  -> applied; app.slots replaced from %s", app.settings.save_path)
 	app_update_boss_status()
 
-	changed := app.death_count != old_deaths
+	_, new_level := app_active_character()
+	changed := app.death_count != old_deaths || new_level != old_level
 	newly_killed := 0
 
 	// What fell this poll, for the overlay banner. Usually one name; a
