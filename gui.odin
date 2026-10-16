@@ -212,6 +212,7 @@ Look_Accent_Set :: struct { target: Look_Target, hex: string }
 Look_Text_Set :: struct { target: Look_Target, hex: string }
 Look_Size_Set :: struct { target: Look_Target, size: int }
 Look_Outline_Set :: struct { target: Look_Target, on: bool }
+Look_Dividers_Set :: struct { target: Look_Target, on: bool }
 Look_Align_Set :: struct { target: Look_Target, align: string }
 Look_Font_Set :: struct { target: Look_Target, name: string }
 Look_Css_Draft :: struct { target: Look_Target, text: string }
@@ -312,6 +313,7 @@ Msg :: union {
 	Look_Text_Set,
 	Look_Size_Set,
 	Look_Outline_Set,
+	Look_Dividers_Set,
 	Look_Align_Set,
 	Look_Font_Set,
 	Look_Css_Draft,
@@ -942,6 +944,12 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 	case Look_Size_Set:
 		sync.guard(&app.mu)
 		settings_look(v.target).font_size = clamp(v.size, 12, 96)
+		app_save_settings()
+		out = gui_theme_changed(out)
+
+	case Look_Dividers_Set:
+		sync.guard(&app.mu)
+		settings_look(v.target).dividers = v.on
 		app_save_settings()
 		out = gui_theme_changed(out)
 

@@ -819,6 +819,12 @@ overlay_theme_css :: proc(look: Appearance, allocator := context.temp_allocator)
 		look.font_size, look.font_size,
 	)
 
+	// Only the overlay card has .boss-item; on a widget page this rule
+	// matches nothing and costs a few bytes.
+	if !look.dividers {
+		strings.write_string(&b, ".boss-item{border-bottom:none;}")
+	}
+
 	if len(look.font_family) > 0 {
 		// Quoted, so a family name with spaces works without the user
 		// having to know CSS quoting rules.

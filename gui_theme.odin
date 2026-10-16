@@ -284,6 +284,21 @@ view_appearance :: proc(
 		t, on_look_outline, id = skald.hash_id(fmt.tprintf("%s.outline", prefix)),
 	))
 
+	// Overlay card only: the hairline is on .boss-item, which the
+	// single-value pages haven't got. Offered where it does nothing and
+	// it reads as a setting that isn't taking.
+	if t == .Overlay {
+		append(&rows, skald.checkbox(
+			ctx, look.dividers, "Line between bosses",
+			t, on_look_dividers,
+			id = skald.hash_id(fmt.tprintf("%s.dividers", prefix)),
+		))
+		append(&rows, paragraph(ctx,
+			"A hairline under each boss in the Next up and Region lists. Tidy on a dark panel; over gameplay with no panel it can look like tearing.",
+			th.color.fg_muted, th.font.size_xs,
+		))
+	}
+
 	append(&rows, skald.spacer(th.spacing.xs))
 	append(&rows, skald.text("Advanced — custom CSS", th.color.fg, th.font.size_sm))
 	append(&rows, paragraph(ctx,
@@ -337,6 +352,9 @@ on_font_size :: proc(t: Look_Target, v: f32) -> Msg {
 }
 on_look_outline :: proc(t: Look_Target, v: bool) -> Msg {
 	return Look_Outline_Set{target = t, on = v}
+}
+on_look_dividers :: proc(t: Look_Target, v: bool) -> Msg {
+	return Look_Dividers_Set{target = t, on = v}
 }
 on_look_align :: proc(t: Look_Target, i: int) -> Msg {
 	align := "left"

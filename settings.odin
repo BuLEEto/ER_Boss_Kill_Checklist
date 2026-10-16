@@ -70,7 +70,7 @@ POLL_SECONDS_DEFAULT :: 5
 //  12  the overlay card can be sent to OBS as a Browser source
 //  13  per-value custom text for the OBS values
 //  14  a cap on how many bosses a region list shows
-SETTINGS_VERSION :: 14
+SETTINGS_VERSION :: 15
 
 // Which region an integration follows. One of these per integration
 // rather than one shared between them: the OBS tab has a panel per
@@ -100,6 +100,10 @@ Appearance :: struct {
 	custom_css:  string `json:"custom_css"`,
 	font_size:   int    `json:"font_size"`,
 	outline:     bool   `json:"outline"`,
+	// The hairline under each boss in the overlay card's lists. Reads as
+	// a table at rest and as noise over busy gameplay, which is why it's
+	// a choice rather than a constant.
+	dividers:    bool   `json:"dividers"`,
 	align:       string `json:"align"`, // left | center | right
 }
 
@@ -122,6 +126,7 @@ default_appearance :: proc() -> Appearance {
 		text_color = "#e0dcd0",
 		font_size  = 28,
 		outline    = true,
+		dividers   = true,
 		align      = "left",
 	}
 }
@@ -766,6 +771,16 @@ migrate_settings :: proc(s: ^Settings) {
 	// a dark scene, which is not a default anyone chose.
 	if s.version < 11 {
 		s.obsws_look = default_obs_text_look()
+	}
+
+	// v15 makes the boss dividers a setting. They were always drawn, so a
+	// v14 file decoding the new bool to false would turn them off for
+	// everyone on first launch — nobody asked for that, same as the
+	// labels at v9.
+	if s.version < 15 {
+		s.browser_look.dividers = true
+		s.ws_look.dividers = true
+		for &w in s.widget_looks do w.look.dividers = true
 	}
 
 	s.version = SETTINGS_VERSION
