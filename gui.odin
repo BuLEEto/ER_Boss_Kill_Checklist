@@ -884,11 +884,13 @@ gui_update :: proc(s: Gui, msg: Msg) -> (Gui, skald.Command(Msg)) {
 		sync.guard(&app.mu)
 		settings_set_string(&app.settings.overlay_mode, string(v))
 		app_save_settings()
+		out = gui_theme_changed(out)
 
 	case Overlay_Bg_Selected:
 		sync.guard(&app.mu)
 		settings_set_string(&app.settings.overlay_bg, string(v))
 		app_save_settings()
+		out = gui_theme_changed(out)
 
 	case Look_Align_Set:
 		sync.guard(&app.mu)
